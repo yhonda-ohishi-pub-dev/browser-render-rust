@@ -3,6 +3,8 @@ use std::time::Instant;
 
 use tonic::{transport::Server, Request, Response, Status};
 use tonic_reflection::server::Builder as ReflectionBuilder;
+use tonic_web::GrpcWebLayer;
+use tower_http::cors::{Any, CorsLayer};
 use tracing::info;
 
 use crate::browser::Renderer;
@@ -161,13 +163,23 @@ pub async fn start_grpc_server(
 ) -> anyhow::Result<()> {
     let server = GrpcServer::new(config, storage, renderer);
 
-    info!("gRPC server starting on {}", address);
+    info!("gRPC server starting on {} (gRPC-web enabled)", address);
 
     let reflection_service = ReflectionBuilder::configure()
         .register_encoded_file_descriptor_set(browser_render::FILE_DESCRIPTOR_SET)
         .build_v1()?;
 
+    // CORS configuration for gRPC-web (allows browser and Cloudflare Tunnel access)
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_headers(Any)
+        .allow_methods(Any)
+        .expose_headers(Any);
+
     Server::builder()
+        .accept_http1(true) // Required for gRPC-web
+        .layer(cors)
+        .layer(GrpcWebLayer::new())
         .add_service(reflection_service)
         .add_service(BrowserRenderServiceServer::new(server))
         .serve(address.parse()?)
