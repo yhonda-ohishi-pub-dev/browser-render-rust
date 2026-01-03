@@ -9,6 +9,32 @@ service BrowserRenderService {
   rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
 }
 
+// ETC Scraper Service
+service EtcScraperService {
+  // Single account scrape (immediate execution)
+  rpc EtcScrape(EtcScrapeRequest) returns (EtcScrapeResponse);
+  // Single account scrape (queued, runs when idle)
+  rpc EtcScrapeQueue(EtcScrapeRequest) returns (EtcScrapeResponse);
+  // Batch scrape with multiple accounts (immediate execution)
+  rpc EtcScrapeBatch(EtcBatchRequest) returns (EtcScrapeResponse);
+  // Batch scrape with multiple accounts (queued, runs when idle)
+  rpc EtcScrapeBatchQueue(EtcBatchRequest) returns (EtcScrapeResponse);
+  // Batch scrape using accounts from environment variable (immediate execution)
+  rpc EtcScrapeBatchEnv(EtcBatchEnvRequest) returns (EtcScrapeResponse);
+  // Batch scrape using accounts from environment variable (queued, runs when idle)
+  rpc EtcScrapeBatchEnvQueue(EtcBatchEnvRequest) returns (EtcScrapeResponse);
+  // Get job status by ID
+  rpc GetJob(GetJobRequest) returns (GetJobResponse);
+  // List all jobs
+  rpc ListJobs(ListJobsRequest) returns (ListJobsResponse);
+  // Get queue status
+  rpc GetQueueStatus(GetQueueStatusRequest) returns (GetQueueStatusResponse);
+  // List ETC session folders
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+  // List files in a session
+  rpc ListSessionFiles(ListSessionFilesRequest) returns (ListSessionFilesResponse);
+}
+
 message GetVehicleDataRequest {
   string branch_id = 1;
   string filter_id = 2;
@@ -53,4 +79,150 @@ message HealthCheckResponse {
   string status = 1;
   string version = 2;
   int64 uptime = 3;
+}
+
+// ========== ETC Scraper Messages ==========
+
+// Single account scrape request
+message EtcScrapeRequest {
+  string user_id = 1;
+  string password = 2;
+  string download_path = 3;  // Optional, defaults to ETC_DOWNLOAD_PATH env or ./downloads
+  bool headless = 4;         // Optional, defaults to true
+}
+
+// Batch scrape request with multiple accounts
+message EtcBatchRequest {
+  repeated EtcAccountInfo accounts = 1;
+  string download_path = 2;  // Optional
+  bool headless = 3;         // Optional, defaults to true
+}
+
+// Batch scrape from environment variable request
+message EtcBatchEnvRequest {
+  string download_path = 1;  // Optional override
+  bool headless = 2;         // Optional override (defaults to true)
+  bool headless_set = 3;     // Whether headless was explicitly set
+}
+
+// Account info for batch requests
+message EtcAccountInfo {
+  string user_id = 1;
+  string password = 2;
+  string name = 3;  // Optional display name
+}
+
+// Response for scrape operations (returns job info)
+message EtcScrapeResponse {
+  string job_id = 1;
+  string status = 2;   // "pending", "queued"
+  string message = 3;
+}
+
+// Get job request
+message GetJobRequest {
+  string job_id = 1;
+}
+
+// Job details response
+message GetJobResponse {
+  bool found = 1;
+  Job job = 2;
+}
+
+// List jobs request
+message ListJobsRequest {
+  // Filter options (optional)
+  string job_type = 1;   // "VehicleData", "EtcScrape", "EtcBatchScrape"
+  string status = 2;     // "Pending", "Queued", "Running", "Completed", "Failed"
+}
+
+// List jobs response
+message ListJobsResponse {
+  repeated Job jobs = 1;
+  int32 count = 2;
+}
+
+// Queue status request
+message GetQueueStatusRequest {}
+
+// Queue status response
+message GetQueueStatusResponse {
+  int32 queue_length = 1;
+  int32 running_jobs = 2;
+  bool is_idle = 3;
+}
+
+// Job data
+message Job {
+  string id = 1;
+  string job_type = 2;       // "VehicleData", "EtcScrape", "EtcBatchScrape"
+  string priority = 3;       // "Normal", "Low"
+  string status = 4;         // "Pending", "Queued", "Running", "Completed", "Failed"
+  string created_at = 5;     // ISO 8601 format
+  string started_at = 6;     // ISO 8601 format, empty if not started
+  string completed_at = 7;   // ISO 8601 format, empty if not completed
+  string error = 8;          // Error message if failed
+  // ETC scrape results
+  EtcScrapeResult etc_result = 9;
+  // ETC batch results
+  EtcBatchResult batch_result = 10;
+  // Current account index for batch jobs
+  int32 current_account_index = 11;
+}
+
+// ETC scrape result
+message EtcScrapeResult {
+  string csv_path = 1;
+  int32 csv_size = 2;
+}
+
+// ETC batch result
+message EtcBatchResult {
+  string session_folder = 1;
+  repeated AccountResult accounts = 2;
+  int32 total_count = 3;
+  int32 success_count = 4;
+  int32 fail_count = 5;
+}
+
+// Individual account result in batch
+message AccountResult {
+  string user_id = 1;
+  string name = 2;
+  string status = 3;      // "Pending", "Running", "Completed", "Failed"
+  string csv_path = 4;    // Set on success
+  int32 csv_size = 5;     // Set on success
+  string error = 6;       // Set on failure
+}
+
+// List sessions request
+message ListSessionsRequest {}
+
+// List sessions response
+message ListSessionsResponse {
+  repeated SessionInfo sessions = 1;
+}
+
+// Session info
+message SessionInfo {
+  string name = 1;        // Session folder name (YYYYMMDD_HHMMSS format)
+  int32 file_count = 2;   // Number of CSV files
+}
+
+// List session files request
+message ListSessionFilesRequest {
+  string session_id = 1;  // Session folder name
+}
+
+// List session files response
+message ListSessionFilesResponse {
+  string session_id = 1;
+  repeated FileInfo files = 2;
+}
+
+// File info
+message FileInfo {
+  string name = 1;
+  int64 size = 2;
 }

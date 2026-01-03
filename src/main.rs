@@ -156,9 +156,10 @@ async fn main() -> anyhow::Result<()> {
             let config_grpc = config.clone();
             let storage_grpc = storage.clone();
             let renderer_grpc = renderer.clone();
+            let job_manager_grpc = job_manager.clone();
 
             tokio::spawn(async move {
-                if let Err(e) = start_grpc_server(config_grpc, storage_grpc, renderer_grpc, &grpc_addr).await {
+                if let Err(e) = start_grpc_server(config_grpc, storage_grpc, renderer_grpc, job_manager_grpc, &grpc_addr).await {
                     error!("gRPC server error: {}", e);
                 }
             });
@@ -196,9 +197,10 @@ async fn main() -> anyhow::Result<()> {
                 let config_grpc = config.clone();
                 let storage_grpc = storage.clone();
                 let renderer_grpc = renderer.clone();
+                let job_manager_grpc = job_manager.clone();
 
                 tokio::spawn(async move {
-                    if let Err(e) = start_grpc_server(config_grpc, storage_grpc, renderer_grpc, &grpc_addr).await {
+                    if let Err(e) = start_grpc_server(config_grpc, storage_grpc, renderer_grpc, job_manager_grpc, &grpc_addr).await {
                         error!("gRPC server error: {}", e);
                     }
                 });
