@@ -20,6 +20,7 @@ tower-http = { version = "0.5", features = ["cors"] }
 
 # gRPC (optional, requires protoc)
 tonic = { version = "0.12", optional = true }
+tonic-reflection = { version = "0.12", optional = true }
 prost = { version = "0.13", optional = true }
 
 # Database
@@ -62,7 +63,7 @@ tonic-build = { version = "0.12", optional = true }
 
 [features]
 default = []
-grpc = ["tonic", "prost", "tonic-build"]
+grpc = ["tonic", "tonic-reflection", "prost", "tonic-build"]
 
 [dev-dependencies]
 tempfile = "3"

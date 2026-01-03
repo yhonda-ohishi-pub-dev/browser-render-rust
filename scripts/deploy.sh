@@ -55,6 +55,7 @@ docker run -d \
     --restart=unless-stopped \
     --init \
     -p 127.0.0.1:8080:8080 \
+    -p 127.0.0.1:50051:50051 \
     -v /opt/browser-render/data:/app/data \
     -v /opt/browser-render/logs:/app/logs \
     -v /opt/browser-render/downloads:/app/downloads \

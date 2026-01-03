@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use tonic::{transport::Server, Request, Response, Status};
+use tonic_reflection::server::Builder as ReflectionBuilder;
 use tracing::info;
 
 use crate::browser::Renderer;
@@ -11,6 +12,9 @@ use crate::storage::Storage;
 // Protocol buffer definitions (inline for now, can be generated from .proto file)
 pub mod browser_render {
     tonic::include_proto!("browser_render.v1");
+
+    pub const FILE_DESCRIPTOR_SET: &[u8] =
+        tonic::include_file_descriptor_set!("browser_render_descriptor");
 }
 
 use browser_render::browser_render_service_server::{
@@ -159,7 +163,12 @@ pub async fn start_grpc_server(
 
     info!("gRPC server starting on {}", address);
 
+    let reflection_service = ReflectionBuilder::configure()
+        .register_encoded_file_descriptor_set(browser_render::FILE_DESCRIPTOR_SET)
+        .build_v1()?;
+
     Server::builder()
+        .add_service(reflection_service)
         .add_service(BrowserRenderServiceServer::new(server))
         .serve(address.parse()?)
         .await?;
