@@ -54,8 +54,7 @@ docker run -d \
     --name ${CONTAINER_NAME} \
     --restart=unless-stopped \
     --init \
-    -p 8080:8080 \
-    -p 50051:50051 \
+    --network host \
     -v /opt/browser-render/data:/app/data \
     -v /opt/browser-render/logs:/app/logs \
     --env-file /opt/browser-render/.env \
