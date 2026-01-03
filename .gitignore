@@ -1,0 +1,30 @@
+# Reference Go project
+browser_render_go_ref/
+
+# Rust
+/target/
+Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+
+# Database
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+data/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

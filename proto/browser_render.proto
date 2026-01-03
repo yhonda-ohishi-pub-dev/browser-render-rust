@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+package browser_render.v1;
+
+service BrowserRenderService {
+  rpc GetVehicleData(GetVehicleDataRequest) returns (GetVehicleDataResponse);
+  rpc CheckSession(CheckSessionRequest) returns (CheckSessionResponse);
+  rpc ClearSession(ClearSessionRequest) returns (ClearSessionResponse);
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+}
+
+message GetVehicleDataRequest {
+  string branch_id = 1;
+  string filter_id = 2;
+  bool force_login = 3;
+}
+
+message GetVehicleDataResponse {
+  string status = 1;
+  int32 status_code = 2;
+  repeated VehicleData data = 3;
+  string session_id = 4;
+}
+
+message VehicleData {
+  string vehicle_cd = 1;
+  string vehicle_name = 2;
+  string status = 3;
+  map<string, string> metadata = 4;
+}
+
+message CheckSessionRequest {
+  string session_id = 1;
+}
+
+message CheckSessionResponse {
+  bool is_valid = 1;
+  string message = 2;
+}
+
+message ClearSessionRequest {
+  string session_id = 1;
+}
+
+message ClearSessionResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message HealthCheckRequest {}
+
+message HealthCheckResponse {
+  string status = 1;
+  string version = 2;
+  int64 uptime = 3;
+}
