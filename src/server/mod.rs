@@ -1,4 +1,5 @@
 mod http;
+mod grpc_json;
 
 #[cfg(feature = "grpc")]
 mod grpc;

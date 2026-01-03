@@ -17,6 +17,8 @@ use crate::config::Config;
 use crate::jobs::{EtcAccountInfo, EtcBatchRequest, EtcScrapeRequest, JobManager, JobPriority};
 use crate::storage::Storage;
 
+use super::grpc_json::create_grpc_json_router;
+
 /// Shared application state
 pub struct AppState {
     pub config: Arc<Config>,
@@ -33,6 +35,9 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .allow_origin(Any)
         .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
         .allow_headers(Any);
+
+    // Create gRPC JSON transcoding router
+    let grpc_json_router = create_grpc_json_router();
 
     Router::new()
         // API endpoints
@@ -54,6 +59,8 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         // Health and metrics
         .route("/health", get(handle_health))
         .route("/metrics", get(handle_metrics))
+        // gRPC JSON transcoding endpoints (stateless, merged directly)
+        .merge(grpc_json_router)
         .layer(cors)
         .with_state(state)
 }
