@@ -20,20 +20,83 @@ use crate::storage::{Cookie, Session, Storage};
 
 #[derive(Error, Debug)]
 pub enum RendererError {
-    #[error("Browser error: {0}")]
-    Browser(String),
+    #[error("Browser error during {context}: {message}")]
+    Browser { context: &'static str, message: String },
     #[error("Login failed: {0}")]
     LoginFailed(String),
-    #[error("Navigation failed: {0}")]
-    NavigationFailed(String),
+    #[error("Navigation failed to {url}: {message}")]
+    NavigationFailed { url: String, message: String },
     #[error("Data extraction failed: {0}")]
     ExtractionFailed(String),
-    #[error("API error: {0}")]
-    ApiError(String),
+    #[error("API error ({status_code}): {message}")]
+    ApiError { status_code: u16, message: String },
     #[error("Session error: {0}")]
     SessionError(String),
     #[error("Storage error: {0}")]
     Storage(#[from] crate::storage::StorageError),
+    #[error("HTTP request error: {0}")]
+    HttpRequest(String),
+    #[error("JSON serialization error: {0}")]
+    JsonError(String),
+}
+
+impl RendererError {
+    /// Create a browser error with context
+    pub fn browser(context: &'static str, err: impl std::fmt::Display) -> Self {
+        Self::Browser {
+            context,
+            message: err.to_string(),
+        }
+    }
+
+    /// Create a navigation error with URL context
+    pub fn navigation(url: impl Into<String>, err: impl std::fmt::Display) -> Self {
+        Self::NavigationFailed {
+            url: url.into(),
+            message: err.to_string(),
+        }
+    }
+
+    /// Create an API error with status code
+    pub fn api(status_code: u16, message: impl Into<String>) -> Self {
+        Self::ApiError {
+            status_code,
+            message: message.into(),
+        }
+    }
+
+    /// Get the appropriate HTTP status code for this error
+    pub fn http_status_code(&self) -> u16 {
+        match self {
+            // Client errors (4xx)
+            Self::LoginFailed(_) => 401,  // Unauthorized
+            Self::SessionError(_) => 401, // Unauthorized
+            Self::NavigationFailed { .. } => 400, // Bad Request (invalid navigation state)
+
+            // Server errors (5xx)
+            Self::Browser { .. } => 500,       // Internal Server Error
+            Self::ExtractionFailed(_) => 500,  // Internal Server Error
+            Self::Storage(_) => 500,           // Internal Server Error
+            Self::HttpRequest(_) => 502,       // Bad Gateway (upstream error)
+            Self::JsonError(_) => 500,         // Internal Server Error
+
+            // API errors - use the original status code if available
+            Self::ApiError { status_code, .. } => *status_code,
+        }
+    }
+
+    /// Check if this error is retryable
+    pub fn is_retryable(&self) -> bool {
+        match self {
+            Self::HttpRequest(_) => true,  // Network errors are often transient
+            Self::ApiError { status_code, .. } => {
+                // 5xx errors and some 4xx are retryable
+                *status_code >= 500 || *status_code == 429
+            }
+            Self::Browser { .. } => true,  // Browser errors might be transient
+            _ => false,
+        }
+    }
 }
 
 pub type Result<T> = std::result::Result<T, RendererError>;
@@ -108,12 +171,12 @@ impl Renderer {
 
         let browser_config = builder
             .build()
-            .map_err(|e| RendererError::Browser(e.to_string()))?;
+            .map_err(|e| RendererError::browser("config build", e))?;
 
         // Launch browser
         let (browser, mut handler) = Browser::launch(browser_config)
             .await
-            .map_err(|e| RendererError::Browser(e.to_string()))?;
+            .map_err(|e| RendererError::browser("launch", e))?;
 
         // Spawn handler task
         tokio::spawn(async move {
@@ -125,7 +188,7 @@ impl Renderer {
         let http_client = Client::builder()
             .timeout(Duration::from_secs(30))
             .build()
-            .map_err(|e| RendererError::Browser(e.to_string()))?;
+            .map_err(|e| RendererError::browser("http client build", e))?;
 
         info!("Browser renderer initialized successfully");
 
@@ -160,7 +223,7 @@ impl Renderer {
             .browser
             .new_page("about:blank")
             .await
-            .map_err(|e| RendererError::Browser(e.to_string()))?;
+            .map_err(|e| RendererError::browser("new page", e))?;
 
         let mut current_session_id = session_id.to_string();
 
@@ -179,7 +242,9 @@ impl Renderer {
                             .build();
 
                         if let Ok(param) = cookie_param {
-                            let _ = page.set_cookie(param).await;
+                            if let Err(e) = page.set_cookie(param).await {
+                                debug!("Failed to set cookie: {}", e);
+                            }
                         }
                     }
                 }
@@ -207,12 +272,15 @@ impl Renderer {
         // Extract vehicle data
         let (vehicles, raw_data) = self.extract_vehicle_data(&page, branch_id, filter_id).await?;
 
-        // Cache the data
+        // Cache the data (non-critical, log errors but continue)
         for vehicle in &vehicles {
-            let _ = self
+            if let Err(e) = self
                 .storage
                 .cache_vehicle_data(&vehicle.vehicle_cd, vehicle, Duration::from_secs(300))
-                .await;
+                .await
+            {
+                debug!("Failed to cache vehicle data for {}: {}", vehicle.vehicle_cd, e);
+            }
         }
 
         // Send to Hono API
@@ -224,8 +292,10 @@ impl Renderer {
             }
         };
 
-        // Close page
-        let _ = page.close().await;
+        // Close page (best effort, don't fail the operation if close fails)
+        if let Err(e) = page.close().await {
+            debug!("Failed to close page: {}", e);
+        }
 
         Ok((vehicles, current_session_id, hono_response))
     }
@@ -239,9 +309,10 @@ impl Renderer {
         );
 
         // Navigate to login page
-        page.goto("https://theearth-np.com/F-OES1010[Login].aspx?mode=timeout")
+        let login_url = "https://theearth-np.com/F-OES1010[Login].aspx?mode=timeout";
+        page.goto(login_url)
             .await
-            .map_err(|e| RendererError::NavigationFailed(e.to_string()))?;
+            .map_err(|e| RendererError::navigation(login_url, e))?;
 
         // Wait for page to load
         sleep(Duration::from_secs(3)).await;
@@ -250,14 +321,14 @@ impl Renderer {
         let has_pass_field = page
             .evaluate("document.querySelector('#txtPass') !== null")
             .await
-            .map_err(|e| RendererError::Browser(e.to_string()))?;
+            .map_err(|e| RendererError::browser("check login form", e))?;
 
         if !has_pass_field.into_value::<bool>().unwrap_or(false) {
             return Err(RendererError::LoginFailed("Login form not found".to_string()));
         }
 
-        // Handle popup if present
-        let _ = page
+        // Handle popup if present (non-critical, continue even if this fails)
+        if let Err(e) = page
             .evaluate(
                 r#"
                 const popup = document.querySelector('#popup_1');
@@ -266,7 +337,10 @@ impl Renderer {
                 }
             "#,
             )
-            .await;
+            .await
+        {
+            debug!("Failed to handle popup (may not exist): {}", e);
+        }
 
         sleep(Duration::from_secs(1)).await;
 
@@ -282,7 +356,7 @@ impl Renderer {
 
         page.evaluate(fill_script.as_str())
             .await
-            .map_err(|e| RendererError::Browser(e.to_string()))?;
+            .map_err(|e| RendererError::browser("fill credentials", e))?;
 
         // Take debug screenshot if enabled
         if self.config.browser_debug {
@@ -299,7 +373,7 @@ impl Renderer {
         // Click login button
         page.evaluate("document.querySelector('#imgLogin').click()")
             .await
-            .map_err(|e| RendererError::Browser(e.to_string()))?;
+            .map_err(|e| RendererError::browser("click login button", e))?;
 
         // Wait for navigation
         sleep(Duration::from_secs(5)).await;
@@ -308,19 +382,19 @@ impl Renderer {
         let login_success = page
             .evaluate("document.querySelector('#Button1st_7') !== null")
             .await
-            .map_err(|e| RendererError::Browser(e.to_string()))?;
+            .map_err(|e| RendererError::browser("check login success", e))?;
 
         if !login_success.into_value::<bool>().unwrap_or(false) {
             // Handle case where user is already logged in
             let has_popup = page
                 .evaluate("document.querySelector('#popup_1') !== null")
                 .await
-                .map_err(|e| RendererError::Browser(e.to_string()))?;
+                .map_err(|e| RendererError::browser("check popup", e))?;
 
             if has_popup.into_value::<bool>().unwrap_or(false) {
                 page.evaluate("document.querySelector('#popup_1').click()")
                     .await
-                    .map_err(|e| RendererError::Browser(e.to_string()))?;
+                    .map_err(|e| RendererError::browser("click popup", e))?;
 
                 sleep(Duration::from_secs(5)).await;
             } else {
@@ -374,9 +448,10 @@ impl Renderer {
     async fn navigate_to_main(&self, page: &Page, _branch_id: &str, _filter_id: &str) -> Result<()> {
         info!("Navigating to Venus Main page...");
 
-        page.goto("https://theearth-np.com/WebVenus/F-AAV0001[VenusMain].aspx")
+        let main_url = "https://theearth-np.com/WebVenus/F-AAV0001[VenusMain].aspx";
+        page.goto(main_url)
             .await
-            .map_err(|e| RendererError::NavigationFailed(e.to_string()))?;
+            .map_err(|e| RendererError::navigation(main_url, e))?;
 
         // Wait for page to load
         sleep(Duration::from_secs(5)).await;
@@ -385,15 +460,16 @@ impl Renderer {
         let current_url = page
             .evaluate("window.location.href")
             .await
-            .map_err(|e| RendererError::Browser(e.to_string()))?;
+            .map_err(|e| RendererError::browser("get current URL", e))?;
 
         let url = current_url.into_value::<String>().unwrap_or_default();
         info!("Current URL after navigation: {}", url);
 
         if url.contains("Login") || url.contains("OES1010") {
-            return Err(RendererError::NavigationFailed(
-                "Redirected to login page".to_string(),
-            ));
+            return Err(RendererError::NavigationFailed {
+                url: main_url.to_string(),
+                message: "Redirected to login page - session may have expired".to_string(),
+            });
         }
 
         Ok(())
@@ -417,7 +493,7 @@ impl Renderer {
             "#,
             )
             .await
-            .map_err(|e| RendererError::Browser(e.to_string()))?;
+            .map_err(|e| RendererError::browser("check VenusBridgeService", e))?;
 
         if !has_service.into_value::<bool>().unwrap_or(false) {
             return Err(RendererError::ExtractionFailed(
@@ -439,7 +515,7 @@ impl Renderer {
             let grid_exists = page
                 .evaluate("document.querySelector('#igGrid-VenusMain-VehicleList') !== null")
                 .await
-                .map_err(|e| RendererError::Browser(e.to_string()))?;
+                .map_err(|e| RendererError::browser("check grid exists", e))?;
 
             if grid_exists.into_value::<bool>().unwrap_or(false) {
                 info!("Venus main grid detected, page structure loaded");
@@ -467,7 +543,7 @@ impl Renderer {
                 "#,
                 )
                 .await
-                .map_err(|e| RendererError::Browser(e.to_string()))?;
+                .map_err(|e| RendererError::browser("check loading messages", e))?;
 
             if !has_loading.into_value::<bool>().unwrap_or(false) {
                 info!("No loading messages detected, proceeding...");
@@ -508,7 +584,7 @@ impl Renderer {
 
         page.evaluate(inject_script.as_str())
             .await
-            .map_err(|e| RendererError::Browser(e.to_string()))?;
+            .map_err(|e| RendererError::browser("inject vehicle data script", e))?;
 
         // Poll for result
         info!("Waiting for vehicle data response...");
@@ -526,20 +602,20 @@ impl Renderer {
             let completed = page
                 .evaluate("window.__vehicleDataCompleted")
                 .await
-                .map_err(|e| RendererError::Browser(e.to_string()))?;
+                .map_err(|e| RendererError::browser("poll data completion", e))?;
 
             if completed.into_value::<bool>().unwrap_or(false) {
                 // Check for error
                 let has_error = page
                     .evaluate("window.__vehicleDataError !== null")
                     .await
-                    .map_err(|e| RendererError::Browser(e.to_string()))?;
+                    .map_err(|e| RendererError::browser("check data error", e))?;
 
                 if has_error.into_value::<bool>().unwrap_or(false) {
                     let error_msg = page
                         .evaluate("window.__vehicleDataError")
                         .await
-                        .map_err(|e| RendererError::Browser(e.to_string()))?;
+                        .map_err(|e| RendererError::browser("get error message", e))?;
 
                     return Err(RendererError::ExtractionFailed(format!(
                         "Service error: {:?}",
@@ -551,7 +627,7 @@ impl Renderer {
                 let result = page
                     .evaluate("JSON.stringify(window.__vehicleDataResult)")
                     .await
-                    .map_err(|e| RendererError::Browser(e.to_string()))?;
+                    .map_err(|e| RendererError::browser("get vehicle data result", e))?;
 
                 let json_str = result.into_value::<String>().unwrap_or_default();
                 info!(
@@ -624,8 +700,11 @@ impl Renderer {
         let timestamp = Utc::now().format("%Y%m%d_%H%M%S");
         let filename = format!("./data/vehicles_{}.json", timestamp);
 
-        // Create data directory
-        let _ = std::fs::create_dir_all("./data");
+        // Create data directory (non-critical, logging handled later if file write fails)
+        if let Err(e) = std::fs::create_dir_all("./data") {
+            warn!("Failed to create data directory: {}", e);
+            return;
+        }
 
         match serde_json::to_string_pretty(raw_data) {
             Ok(json) => {
@@ -647,7 +726,7 @@ impl Renderer {
         info!("sendRawToHonoAPI: Sending {} records", raw_data.len());
 
         let json_data =
-            serde_json::to_string(raw_data).map_err(|e| RendererError::ApiError(e.to_string()))?;
+            serde_json::to_string(raw_data).map_err(|e| RendererError::JsonError(e.to_string()))?;
 
         info!("sendRawToHonoAPI: JSON size: {} bytes", json_data.len());
 
@@ -658,20 +737,17 @@ impl Renderer {
             .body(json_data)
             .send()
             .await
-            .map_err(|e| RendererError::ApiError(e.to_string()))?;
+            .map_err(|e| RendererError::HttpRequest(e.to_string()))?;
 
         let status = response.status();
         let body = response
             .text()
             .await
-            .map_err(|e| RendererError::ApiError(e.to_string()))?;
+            .map_err(|e| RendererError::HttpRequest(e.to_string()))?;
 
         if !status.is_success() {
             error!("API Error - Status: {}, Body: {}", status, body);
-            return Err(RendererError::ApiError(format!(
-                "API returned status {}",
-                status
-            )));
+            return Err(RendererError::api(status.as_u16(), body));
         }
 
         info!("API Success - Status: {}, Body: {}", status, body);

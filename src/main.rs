@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use clap::Parser;
 use tokio::signal;
 use tokio::sync::broadcast;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use browser::Renderer;
 use config::Config;
@@ -222,8 +222,10 @@ async fn main() -> anyhow::Result<()> {
     signal::ctrl_c().await?;
     info!("Received shutdown signal. Shutting down gracefully...");
 
-    // Send shutdown signal
-    let _ = shutdown_tx.send(());
+    // Send shutdown signal (receiver may already be dropped, which is fine)
+    if shutdown_tx.send(()).is_err() {
+        debug!("Shutdown signal receiver already dropped");
+    }
 
     // Give some time for graceful shutdown
     tokio::time::sleep(Duration::from_secs(2)).await;

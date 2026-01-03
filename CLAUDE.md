@@ -61,7 +61,7 @@ cargo run -- --debug
 ## TODO
 
 - [x] 実環境でのテスト（統合テスト完了）
-- [ ] エラーハンドリングの改善
+- [x] エラーハンドリングの改善（2026-01-03完了）
 - [ ] メトリクス追加
 - [ ] ログ出力の最適化
 
@@ -110,3 +110,33 @@ cargo test --test browser_integration_test test_mock_server_standalone -- --noca
 4. **テストアサーション修正** (`tests/browser_integration_test.rs:280-286`)
    - 実際のAPIデータには`Status`フィールドがなく、`State`/`AllState`フィールドを使用
    - テストのアサーションを実際のデータ構造に合わせて修正
+
+#### 2026-01-03: エラーハンドリングの改善
+
+1. **RendererError型の拡張** (`src/browser/renderer.rs:22-100`)
+   - コンテキスト情報を含む構造体型エラーに変更（Browser, NavigationFailed, ApiError）
+   - `http_status_code()`: エラーからHTTPステータスコードへのマッピング
+   - `is_retryable()`: リトライ可能かどうかの判定メソッド
+   - ヘルパーメソッド追加: `browser()`, `navigation()`, `api()`
+
+2. **パニックリスクの修正** (`src/server/http.rs:126`)
+   - `serde_json::to_value(job).unwrap()` を `Json(job)` に簡素化
+
+3. **エラーコンテキストの改善** (`src/browser/renderer.rs`)
+   - 全ての`map_err`にコンテキスト情報を追加（例: "check login form", "inject vehicle data script"）
+   - NavigationFailedにURL情報を含める
+   - ApiErrorにHTTPステータスコードを含める
+
+4. **HTTPステータスコードの適切なマッピング** (`src/server/http.rs`)
+   - `RendererError::http_status_code()`を使用して適切なステータスコードを返却
+   - 401: LoginFailed, SessionError
+   - 400: NavigationFailed
+   - 500: Browser, ExtractionFailed, Storage, JsonError
+   - 502: HttpRequest（upstream error）
+
+5. **無視されていたエラーのログ出力追加**
+   - Cookie設定エラー: `debug!`レベルでログ
+   - キャッシュエラー: `debug!`レベルでログ
+   - ページクローズエラー: `debug!`レベルでログ
+   - ポップアップ処理エラー: `debug!`レベルでログ
+   - データディレクトリ作成エラー: `warn!`レベルでログ

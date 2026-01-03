@@ -123,7 +123,7 @@ async fn handle_job_status(
     Path(job_id): Path<String>,
 ) -> impl IntoResponse {
     match state.job_manager.get_job(&job_id).await {
-        Some(job) => (StatusCode::OK, Json(serde_json::to_value(job).unwrap())).into_response(),
+        Some(job) => (StatusCode::OK, Json(job)).into_response(),
         None => (
             StatusCode::NOT_FOUND,
             Json(ErrorResponse {
@@ -193,8 +193,10 @@ async fn handle_session_clear(
         ),
         Err(e) => {
             error!("Failed to clear session: {}", e);
+            let status_code = StatusCode::from_u16(e.http_status_code())
+                .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
             (
-                StatusCode::INTERNAL_SERVER_ERROR,
+                status_code,
                 Json(SessionClearResponse {
                     success: false,
                     message: format!("Failed to clear session: {}", e),
