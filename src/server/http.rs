@@ -14,7 +14,7 @@ use tracing::{error, info};
 
 use crate::browser::Renderer;
 use crate::config::Config;
-use crate::jobs::{EtcScrapeRequest, JobManager, JobPriority};
+use crate::jobs::{EtcAccountInfo, EtcBatchRequest, EtcScrapeRequest, JobManager, JobPriority};
 use crate::storage::Storage;
 
 /// Shared application state
@@ -39,6 +39,10 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/v1/vehicle/data", get(handle_vehicle_data))
         .route("/v1/etc/scrape", post(handle_etc_scrape))
         .route("/v1/etc/scrape/queue", post(handle_etc_scrape_queue))
+        .route("/v1/etc/scrape/batch", post(handle_etc_scrape_batch))
+        .route("/v1/etc/scrape/batch/queue", post(handle_etc_scrape_batch_queue))
+        .route("/v1/etc/scrape/batch/env", post(handle_etc_scrape_batch_env))
+        .route("/v1/etc/scrape/batch/env/queue", post(handle_etc_scrape_batch_env_queue))
         .route("/v1/job/:id", get(handle_job_status))
         .route("/v1/jobs", get(handle_jobs_list))
         .route("/v1/jobs/queue", get(handle_queue_status))
@@ -84,11 +88,60 @@ struct EtcScrapeRequestBody {
 }
 
 fn default_download_path() -> String {
-    "./downloads".to_string()
+    std::env::var("ETC_DOWNLOAD_PATH").unwrap_or_else(|_| "./downloads".to_string())
 }
 
 fn default_headless() -> bool {
     true
+}
+
+#[derive(Deserialize)]
+struct EtcAccountInfoBody {
+    user_id: String,
+    password: String,
+    #[serde(default)]
+    name: String,
+}
+
+#[derive(Deserialize)]
+struct EtcBatchRequestBody {
+    accounts: Vec<EtcAccountInfoBody>,
+    #[serde(default = "default_download_path")]
+    download_path: String,
+    #[serde(default = "default_headless")]
+    headless: bool,
+}
+
+/// Request body for env-based batch scrape (optional overrides)
+#[derive(Deserialize, Default)]
+struct EtcBatchEnvRequestBody {
+    #[serde(default)]
+    download_path: Option<String>,
+    #[serde(default)]
+    headless: Option<bool>,
+}
+
+/// Get accounts from ETC_ACCOUNTS environment variable
+/// Format: JSON array of {"user_id": "...", "password": "...", "name": "..."}
+fn get_accounts_from_env() -> Result<Vec<EtcAccountInfo>, String> {
+    let accounts_json = std::env::var("ETC_ACCOUNTS")
+        .map_err(|_| "ETC_ACCOUNTS environment variable not set".to_string())?;
+
+    let accounts: Vec<EtcAccountInfoBody> = serde_json::from_str(&accounts_json)
+        .map_err(|e| format!("Failed to parse ETC_ACCOUNTS: {}", e))?;
+
+    if accounts.is_empty() {
+        return Err("ETC_ACCOUNTS is empty".to_string());
+    }
+
+    Ok(accounts
+        .into_iter()
+        .map(|a| EtcAccountInfo {
+            user_id: a.user_id,
+            password: a.password,
+            name: a.name,
+        })
+        .collect())
 }
 
 #[derive(Deserialize)]
@@ -226,6 +279,194 @@ async fn handle_etc_scrape_queue(
             message: "ETC scrape job queued. Will run when system is idle. Use /v1/job/{id} to check status.".to_string(),
         }),
     )
+}
+
+/// ETC batch scrape endpoint - runs immediately
+async fn handle_etc_scrape_batch(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<EtcBatchRequestBody>,
+) -> impl IntoResponse {
+    let accounts: Vec<EtcAccountInfo> = body
+        .accounts
+        .into_iter()
+        .map(|a| EtcAccountInfo {
+            user_id: a.user_id,
+            password: a.password,
+            name: a.name,
+        })
+        .collect();
+
+    let account_count = accounts.len();
+    let request = EtcBatchRequest {
+        accounts,
+        download_path: body.download_path,
+        headless: body.headless,
+    };
+
+    let job_id = state
+        .job_manager
+        .create_etc_batch_job(request, JobPriority::Normal)
+        .await;
+
+    info!(
+        "Created ETC batch scrape job (immediate): {} for {} accounts",
+        job_id, account_count
+    );
+
+    (
+        StatusCode::ACCEPTED,
+        Json(VehicleDataResponse {
+            job_id,
+            status: "pending".to_string(),
+            message: format!(
+                "ETC batch scrape job created for {} accounts. Use /v1/job/{{id}} to check status.",
+                account_count
+            ),
+        }),
+    )
+}
+
+/// ETC batch scrape queue endpoint - runs when idle
+async fn handle_etc_scrape_batch_queue(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<EtcBatchRequestBody>,
+) -> impl IntoResponse {
+    let accounts: Vec<EtcAccountInfo> = body
+        .accounts
+        .into_iter()
+        .map(|a| EtcAccountInfo {
+            user_id: a.user_id,
+            password: a.password,
+            name: a.name,
+        })
+        .collect();
+
+    let account_count = accounts.len();
+    let request = EtcBatchRequest {
+        accounts,
+        download_path: body.download_path,
+        headless: body.headless,
+    };
+
+    let job_id = state
+        .job_manager
+        .create_etc_batch_job(request, JobPriority::Low)
+        .await;
+
+    info!(
+        "Created ETC batch scrape job (queued): {} for {} accounts",
+        job_id, account_count
+    );
+
+    (
+        StatusCode::ACCEPTED,
+        Json(VehicleDataResponse {
+            job_id,
+            status: "queued".to_string(),
+            message: format!(
+                "ETC batch scrape job queued for {} accounts. Will run when system is idle. Use /v1/job/{{id}} to check status.",
+                account_count
+            ),
+        }),
+    )
+}
+
+/// ETC batch scrape from env endpoint - runs immediately
+async fn handle_etc_scrape_batch_env(
+    State(state): State<Arc<AppState>>,
+    body: Option<Json<EtcBatchEnvRequestBody>>,
+) -> impl IntoResponse {
+    let body = body.map(|b| b.0).unwrap_or_default();
+
+    let accounts = match get_accounts_from_env() {
+        Ok(a) => a,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse { error: e }),
+            )
+                .into_response()
+        }
+    };
+
+    let account_count = accounts.len();
+    let request = EtcBatchRequest {
+        accounts,
+        download_path: body.download_path.unwrap_or_else(default_download_path),
+        headless: body.headless.unwrap_or_else(default_headless),
+    };
+
+    let job_id = state
+        .job_manager
+        .create_etc_batch_job(request, JobPriority::Normal)
+        .await;
+
+    info!(
+        "Created ETC batch scrape job from env (immediate): {} for {} accounts",
+        job_id, account_count
+    );
+
+    (
+        StatusCode::ACCEPTED,
+        Json(VehicleDataResponse {
+            job_id,
+            status: "pending".to_string(),
+            message: format!(
+                "ETC batch scrape job created for {} accounts from env. Use /v1/job/{{id}} to check status.",
+                account_count
+            ),
+        }),
+    )
+        .into_response()
+}
+
+/// ETC batch scrape from env queue endpoint - runs when idle
+async fn handle_etc_scrape_batch_env_queue(
+    State(state): State<Arc<AppState>>,
+    body: Option<Json<EtcBatchEnvRequestBody>>,
+) -> impl IntoResponse {
+    let body = body.map(|b| b.0).unwrap_or_default();
+
+    let accounts = match get_accounts_from_env() {
+        Ok(a) => a,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse { error: e }),
+            )
+                .into_response()
+        }
+    };
+
+    let account_count = accounts.len();
+    let request = EtcBatchRequest {
+        accounts,
+        download_path: body.download_path.unwrap_or_else(default_download_path),
+        headless: body.headless.unwrap_or_else(default_headless),
+    };
+
+    let job_id = state
+        .job_manager
+        .create_etc_batch_job(request, JobPriority::Low)
+        .await;
+
+    info!(
+        "Created ETC batch scrape job from env (queued): {} for {} accounts",
+        job_id, account_count
+    );
+
+    (
+        StatusCode::ACCEPTED,
+        Json(VehicleDataResponse {
+            job_id,
+            status: "queued".to_string(),
+            message: format!(
+                "ETC batch scrape job queued for {} accounts from env. Will run when system is idle. Use /v1/job/{{id}} to check status.",
+                account_count
+            ),
+        }),
+    )
+        .into_response()
 }
 
 /// Queue status endpoint

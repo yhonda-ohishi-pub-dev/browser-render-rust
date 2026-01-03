@@ -53,12 +53,16 @@ cargo test --test browser_integration_test test_mock_server_standalone -- --noca
 | `/v1/vehicle/data` | GET | Vehicleデータ取得ジョブ作成 |
 | `/v1/etc/scrape` | POST | ETC明細スクレイプ（即時実行） |
 | `/v1/etc/scrape/queue` | POST | ETC明細スクレイプ（idle時実行） |
+| `/v1/etc/scrape/batch` | POST | ETC明細スクレイプ（複数アカウント、即時実行） |
+| `/v1/etc/scrape/batch/queue` | POST | ETC明細スクレイプ（複数アカウント、idle時実行） |
+| `/v1/etc/scrape/batch/env` | POST | ETC明細スクレイプ（環境変数からアカウント取得、即時実行） |
+| `/v1/etc/scrape/batch/env/queue` | POST | ETC明細スクレイプ（環境変数からアカウント取得、idle時実行） |
 | `/v1/job/:id` | GET | ジョブステータス確認 |
 | `/v1/jobs` | GET | 全ジョブ一覧 |
 | `/v1/jobs/queue` | GET | キュー状態確認 |
 | `/health` | GET | ヘルスチェック |
 
-### ETC Scrape Request Body
+### ETC Scrape Request Body（単一アカウント）
 ```json
 {
   "user_id": "xxx",
@@ -67,6 +71,50 @@ cargo test --test browser_integration_test test_mock_server_standalone -- --noca
   "headless": true
 }
 ```
+
+### ETC Batch Scrape Request Body（複数アカウント）
+```json
+{
+  "accounts": [
+    {"user_id": "user1", "password": "pass1", "name": "ユーザー1"},
+    {"user_id": "user2", "password": "pass2", "name": "ユーザー2"}
+  ],
+  "download_path": "./downloads",
+  "headless": true
+}
+```
+
+### 環境変数でのアカウント設定
+
+| 環境変数 | 説明 | 例 |
+|----------|------|-----|
+| `ETC_ACCOUNTS` | アカウント情報（JSON配列） | `[{"user_id":"u1","password":"p1","name":"名前1"}]` |
+| `ETC_DOWNLOAD_PATH` | ダウンロード先パス | `/data/downloads` |
+
+```bash
+# .envファイル例
+ETC_ACCOUNTS='[{"user_id":"user1","password":"pass1","name":"ユーザー1"},{"user_id":"user2","password":"pass2","name":"ユーザー2"}]'
+ETC_DOWNLOAD_PATH=/data/etc-downloads
+```
+
+### 環境変数バッチエンドポイント
+リクエストボディはオプション（download_path/headlessの上書き用）：
+```bash
+# 環境変数のみで実行
+curl -X POST http://localhost:8080/v1/etc/scrape/batch/env
+
+# download_pathを上書き
+curl -X POST http://localhost:8080/v1/etc/scrape/batch/env \
+  -H "Content-Type: application/json" \
+  -d '{"download_path": "/custom/path"}'
+```
+
+**バッチ処理の特徴：**
+- 複数アカウントを1ジョブで順次処理
+- セッションフォルダ（YYYYMMDD_HHMMSS形式）に全CSVを保存
+- アカウントごとの進捗・ステータスを個別追跡
+- 1つでも失敗→ジョブ全体はFailed（ただし成功分のCSVは保存済み）
+- **自動クリーンアップ**: 古いセッションフォルダを自動削除（最新10個を保持）
 
 ## Architecture
 
@@ -141,4 +189,5 @@ gcloud compute ssh instance-20251207-115015 --zone=asia-northeast1-b --command="
 - [x] ログ出力の最適化
 - [x] Docker + GCE自動デプロイ
 - [x] ETC明細スクレイパー統合
+- [x] ETC複数アカウントバッチ処理
 - [ ] メトリクス追加
