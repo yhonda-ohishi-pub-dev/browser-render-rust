@@ -1,0 +1,45 @@
+# Build artifacts
+target/
+*.rs.bk
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Documentation
+*.md
+!README.md
+
+# Reference project
+browser_render_go_ref/
+
+# Logs and data
+logs/
+data/
+*.log
+*.db
+
+# Scripts (not needed in container)
+scripts/
+
+# Tests
+tests/
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+
+# Misc
+Dockerfile
+docker-compose*.yml

@@ -1,0 +1,12 @@
+#!/bin/bash
+# Pre-push hook: Build and deploy to GCE
+# To enable: git config core.hooksPath .githooks
+
+set -e
+
+echo "=== Pre-push: Starting deploy ==="
+
+# Run deploy script
+./scripts/deploy.sh
+
+echo "=== Pre-push: Deploy complete ==="
