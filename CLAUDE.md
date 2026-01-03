@@ -69,15 +69,29 @@ docker push ghcr.io/yhonda-ohishi-pub-dev/browser-render-rust:test
 
 ### GCE初期セットアップ（1回のみ）
 ```bash
+# 1. セットアップスクリプトをコピー・実行
 gcloud compute scp scripts/gce-setup.sh instance-20251207-115015:~ --zone=asia-northeast1-b
 gcloud compute ssh instance-20251207-115015 --zone=asia-northeast1-b --command="bash ~/gce-setup.sh"
-# /opt/browser-render/.env を編集して認証情報設定
+
+# 2. ローカルの.envをGCEにコピー
+gcloud compute scp .env instance-20251207-115015:/tmp/.env --zone=asia-northeast1-b
+gcloud compute ssh instance-20251207-115015 --zone=asia-northeast1-b --command="sudo mv /tmp/.env /opt/browser-render/.env"
+
+# 3. GHCRにログイン（.envにGHCR_TOKENが必要）
+gcloud compute ssh instance-20251207-115015 --zone=asia-northeast1-b --command="grep GHCR_TOKEN /opt/browser-render/.env | cut -d= -f2 | sudo docker login ghcr.io -u yhonda-ohishi-pub-dev --password-stdin"
 ```
 
 ### Pre-pushフック
 `git push`時に自動デプロイ（`.githooks/pre-push`）
 ```bash
 git config core.hooksPath .githooks  # 有効化済み
+```
+
+### Cron設定（GCE上）
+10分おきにVehicleデータ取得を実行:
+```bash
+# /etc/cron.d/vehicle-fetch
+*/10 * * * * root curl -sf http://localhost:8080/v1/vehicle/data >> /opt/browser-render/logs/vehicle-cron.log 2>&1
 ```
 
 ## TODO

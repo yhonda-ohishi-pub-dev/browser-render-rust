@@ -26,11 +26,14 @@ COPY src ./src
 # Touch main.rs to invalidate cache for source files only
 RUN touch src/main.rs && cargo build --release
 
-# Stage 2: Chromium + dependencies
-FROM debian:bookworm-slim AS chromium
+# Stage 2: Runtime with headless-shell
+FROM chromedp/headless-shell:stable AS headless
 
+# Stage 3: Final runtime
+FROM debian:bookworm-slim
+
+# Install runtime dependencies only
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    chromium \
     libsqlite3-0 \
     libssl3 \
     ca-certificates \
@@ -50,39 +53,31 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxfixes3 \
     libxkbcommon0 \
     libxrandr2 \
-    && rm -rf /var/lib/apt/lists/*
-
-# Stage 3: Distroless runtime
-FROM gcr.io/distroless/cc-debian12:nonroot
+    dumb-init \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd -r appuser && useradd -r -g appuser appuser
 
 WORKDIR /app
 
 # Copy binary from builder
 COPY --from=builder /build/target/release/browser-render .
 
-# Copy Chromium and its dependencies
-COPY --from=chromium /usr/bin/chromium /usr/bin/chromium
-COPY --from=chromium /usr/lib/chromium /usr/lib/chromium
-COPY --from=chromium /usr/share/chromium /usr/share/chromium
-COPY --from=chromium /etc/chromium /etc/chromium
+# Copy headless-shell from chromedp image
+COPY --from=headless /headless-shell /headless-shell
 
-# Copy shared libraries required by the binary and Chromium
-COPY --from=chromium /lib/x86_64-linux-gnu /lib/x86_64-linux-gnu
-COPY --from=chromium /usr/lib/x86_64-linux-gnu /usr/lib/x86_64-linux-gnu
+# Environment - use headless-shell
+ENV CHROME_PATH=/headless-shell/headless-shell
+ENV CHROMIUM_PATH=/headless-shell/headless-shell
 
-# Copy fonts for proper rendering
-COPY --from=chromium /usr/share/fonts /usr/share/fonts
-COPY --from=chromium /etc/fonts /etc/fonts
+# Create data directories
+RUN mkdir -p /app/data /app/logs && chown -R appuser:appuser /app
 
-# Copy CA certificates for HTTPS
-COPY --from=chromium /etc/ssl/certs /etc/ssl/certs
-
-# Environment
-ENV CHROME_PATH=/usr/bin/chromium
-ENV CHROMIUM_PATH=/usr/bin/chromium
+# Switch to non-root user
+USER appuser
 
 # Expose ports (HTTP and gRPC)
 EXPOSE 8080 50051
 
-# Run as nonroot user (UID 65532 in distroless)
-CMD ["./browser-render", "--headless", "true", "--log-format", "json"]
+# Use dumb-init to reap zombie processes
+ENTRYPOINT ["/usr/bin/dumb-init", "--"]
+CMD ["./browser-render", "--server", "http", "--log-format", "json"]

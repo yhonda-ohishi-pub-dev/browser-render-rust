@@ -149,8 +149,14 @@ impl Renderer {
         let user_data_dir = std::env::temp_dir()
             .join(format!("chromiumoxide-{}", unique_id));
 
+        // Get Chrome path from environment or use default
+        let chrome_path = std::env::var("CHROME_PATH")
+            .or_else(|_| std::env::var("CHROMIUM_PATH"))
+            .unwrap_or_else(|_| "chromium".to_string());
+
         // Build browser configuration
         let mut builder = BrowserConfig::builder()
+            .chrome_executable(chrome_path)
             .user_data_dir(&user_data_dir);
 
         // with_head() enables GUI mode, so we call it only when NOT headless
@@ -161,7 +167,8 @@ impl Renderer {
         builder = builder
             .no_sandbox()
             .arg("--disable-blink-features=AutomationControlled")
-            .arg("--disable-dev-shm-usage");
+            .arg("--disable-dev-shm-usage")
+            .arg("--disable-gpu");
 
         if config.browser_debug {
             builder = builder
