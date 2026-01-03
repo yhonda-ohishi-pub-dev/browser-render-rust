@@ -713,7 +713,7 @@ async fn process_etc_batch_job(
     request: EtcBatchRequest,
     session_folder: String,
 ) {
-    use scraper_service::{EtcScraper, ScraperConfig, Scraper};
+    use scraper_service::{EtcScraper, ScraperConfig, ScraperError, Scraper};
 
     // Increment running count
     {
@@ -801,6 +801,18 @@ async fn process_etc_batch_job(
                                 success_count += 1;
                                 info!(
                                     "ETC batch job {}: Account {} completed successfully",
+                                    job_id, name
+                                );
+                            }
+                            Err(ScraperError::NoUsageData(msg)) => {
+                                // 明細なしは成功扱い（スキップ）
+                                account_result.set_completed(
+                                    format!("skipped: {}", msg),
+                                    0,
+                                );
+                                success_count += 1;
+                                info!(
+                                    "ETC batch job {}: Account {} skipped (no usage data)",
                                     job_id, name
                                 );
                             }
