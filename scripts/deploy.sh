@@ -54,9 +54,10 @@ docker run -d \
     --name ${CONTAINER_NAME} \
     --restart=unless-stopped \
     --init \
-    --network host \
+    -p 127.0.0.1:8080:8080 \
     -v /opt/browser-render/data:/app/data \
     -v /opt/browser-render/logs:/app/logs \
+    -v /opt/browser-render/downloads:/app/downloads \
     --env-file /opt/browser-render/.env \
     --shm-size=2g \
     --security-opt seccomp=unconfined \
