@@ -1,6 +1,7 @@
 mod browser;
 mod config;
 mod jobs;
+mod logging;
 mod server;
 mod storage;
 
@@ -13,7 +14,7 @@ use tokio::sync::broadcast;
 use tracing::{debug, error, info, warn};
 
 use browser::Renderer;
-use config::Config;
+use config::{Config, LogFormat, LogRotation};
 use jobs::JobManager;
 use server::{start_http_server, AppState};
 use storage::Storage;
@@ -48,6 +49,22 @@ struct Args {
     /// Server type: grpc, http, or both
     #[arg(long, default_value = "http")]
     server: String,
+
+    /// Log output format: text or json
+    #[arg(long, default_value = "text")]
+    log_format: String,
+
+    /// Log output file name (enables file output when specified)
+    #[arg(long)]
+    log_file: Option<String>,
+
+    /// Log directory for file output
+    #[arg(long, default_value = "./logs")]
+    log_dir: String,
+
+    /// Log file rotation: daily, hourly, or never
+    #[arg(long, default_value = "daily")]
+    log_rotation: String,
 }
 
 #[tokio::main]
@@ -71,17 +88,16 @@ async fn main() -> anyhow::Result<()> {
     cfg.browser_headless = args.headless;
     cfg.browser_debug = args.debug;
 
-    // Setup logging
-    let filter = if cfg.browser_debug {
-        "debug"
-    } else {
-        "info"
-    };
+    // Apply logging-specific overrides from CLI
+    cfg.log_format = LogFormat::from_str(&args.log_format);
+    if let Some(ref file) = args.log_file {
+        cfg.log_file = Some(file.clone());
+    }
+    cfg.log_dir = args.log_dir.clone();
+    cfg.log_rotation = LogRotation::from_str(&args.log_rotation);
 
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_target(true)
-        .init();
+    // Initialize logging (guard must be held until shutdown)
+    let _logging_guard = logging::init_logging(&cfg);
 
     info!("Starting Browser Render Rust Server...");
     info!(

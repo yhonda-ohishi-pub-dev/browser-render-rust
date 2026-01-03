@@ -62,8 +62,42 @@ cargo run -- --debug
 
 - [x] 実環境でのテスト（統合テスト完了）
 - [x] エラーハンドリングの改善（2026-01-03完了）
+- [x] ログ出力の最適化（2026-01-03完了）
 - [ ] メトリクス追加
-- [ ] ログ出力の最適化
+
+## ログ設定
+
+### CLI引数
+
+| 引数 | デフォルト | 説明 |
+|------|------------|------|
+| `--log-format` | `text` | 出力形式: `text` または `json` |
+| `--log-file` | (なし) | ファイル名（指定でファイル出力有効） |
+| `--log-dir` | `./logs` | ログディレクトリ |
+| `--log-rotation` | `daily` | ローテーション: `daily`, `hourly`, `never` |
+
+### 環境変数
+
+| 変数 | デフォルト | 説明 |
+|------|------------|------|
+| `RUST_LOG` | (なし) | モジュール別ログレベル制御 |
+| `LOG_FORMAT` | `text` | 出力形式 |
+| `LOG_FILE` | (なし) | ファイル名 |
+| `LOG_DIR` | `./logs` | ディレクトリ |
+| `LOG_ROTATION` | `daily` | ローテーション |
+
+### 使用例
+
+```bash
+# JSON形式でファイル出力（本番環境推奨）
+cargo run -- --log-format json --log-file app.log
+
+# モジュール別ログレベル制御
+RUST_LOG=browser_render::browser=debug,info cargo run
+
+# 本番設定
+cargo run -- --log-format json --log-file app.log --log-dir /var/log/browser-render
+```
 
 ## 統合テスト
 

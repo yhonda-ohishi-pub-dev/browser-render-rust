@@ -4,6 +4,42 @@ use std::time::Duration;
 
 use tracing::warn;
 
+/// Log output format
+#[derive(Debug, Clone, Default)]
+pub enum LogFormat {
+    #[default]
+    Text,
+    Json,
+}
+
+impl LogFormat {
+    pub fn from_str(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "json" => Self::Json,
+            _ => Self::Text,
+        }
+    }
+}
+
+/// Log file rotation strategy
+#[derive(Debug, Clone, Default)]
+pub enum LogRotation {
+    #[default]
+    Daily,
+    Hourly,
+    Never,
+}
+
+impl LogRotation {
+    pub fn from_str(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "hourly" => Self::Hourly,
+            "never" => Self::Never,
+            _ => Self::Daily,
+        }
+    }
+}
+
 /// Application configuration loaded from environment variables
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -30,6 +66,12 @@ pub struct Config {
 
     // API settings
     pub hono_api_url: String,
+
+    // Logging settings
+    pub log_format: LogFormat,
+    pub log_file: Option<String>,
+    pub log_dir: String,
+    pub log_rotation: LogRotation,
 }
 
 impl Config {
@@ -51,6 +93,10 @@ impl Config {
             session_ttl: get_env_duration("SESSION_TTL", Duration::from_secs(600)), // 10 minutes
             cookie_ttl: get_env_duration("COOKIE_TTL", Duration::from_secs(86400)), // 24 hours
             hono_api_url: get_env("HONO_API_URL", "https://hono-api.mtamaramu.com/api/dtakologs"),
+            log_format: LogFormat::from_str(&get_env("LOG_FORMAT", "text")),
+            log_file: env::var("LOG_FILE").ok(),
+            log_dir: get_env("LOG_DIR", "./logs"),
+            log_rotation: LogRotation::from_str(&get_env("LOG_ROTATION", "daily")),
         };
 
         // Validate required fields
