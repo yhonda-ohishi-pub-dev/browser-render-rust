@@ -32,7 +32,14 @@ gcloud compute ssh ${GCE_INSTANCE} \
     --command="
 set -e
 
-# Login to GHCR (uses gcloud auth token)
+# Login to GHCR using token from .env
+if [ -f /opt/browser-render/.env ]; then
+    GHCR_TOKEN=\$(grep GHCR_TOKEN /opt/browser-render/.env | cut -d= -f2)
+    if [ -n \"\$GHCR_TOKEN\" ]; then
+        echo \"\$GHCR_TOKEN\" | docker login ghcr.io -u yhonda-ohishi-pub-dev --password-stdin
+    fi
+fi
+
 echo 'Pulling new image...'
 docker pull ${IMAGE}:${TAG}
 
@@ -46,6 +53,7 @@ echo 'Starting new container...'
 docker run -d \
     --name ${CONTAINER_NAME} \
     --restart=unless-stopped \
+    --init \
     -p 8080:8080 \
     -p 50051:50051 \
     -v /opt/browser-render/data:/app/data \

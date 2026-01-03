@@ -62,11 +62,25 @@ fi
 sudo systemctl enable docker
 sudo systemctl start docker
 
-# Login to GHCR
-echo ""
-echo "Please login to GitHub Container Registry:"
-echo "Run: docker login ghcr.io -u <your-github-username>"
-echo ""
+# Setup GHCR authentication from .env if token exists
+setup_ghcr_auth() {
+    if [ -f /opt/browser-render/.env ]; then
+        GHCR_TOKEN=$(grep GHCR_TOKEN /opt/browser-render/.env | cut -d= -f2)
+        if [ -n "$GHCR_TOKEN" ]; then
+            echo "Setting up GHCR authentication..."
+            echo "$GHCR_TOKEN" | sudo docker login ghcr.io -u yhonda-ohishi-pub-dev --password-stdin
+            echo "GHCR authentication configured."
+        else
+            echo ""
+            echo "Please login to GitHub Container Registry:"
+            echo "Run: docker login ghcr.io -u <your-github-username>"
+            echo ""
+        fi
+    fi
+}
+
+# Try to setup GHCR auth (will work after .env is copied with GHCR_TOKEN)
+setup_ghcr_auth
 
 # Create cleanup cron job (remove old images weekly)
 (crontab -l 2>/dev/null | grep -v "docker image prune"; echo "0 3 * * 0 docker image prune -af --filter 'until=168h'") | crontab -
