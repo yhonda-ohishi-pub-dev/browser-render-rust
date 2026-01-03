@@ -87,6 +87,14 @@ fn default_headless() -> bool {
     true
 }
 
+fn default_download_timeout() -> Duration {
+    std::env::var("ETC_DOWNLOAD_TIMEOUT")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .map(Duration::from_secs)
+        .unwrap_or(Duration::from_secs(120))
+}
+
 /// ETC scrape result data
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EtcScrapeResult {
@@ -677,7 +685,8 @@ async fn execute_etc_scrape(request: &EtcScrapeRequest) -> Result<EtcScrapeResul
 
     let config = ScraperConfig::new(&request.user_id, &request.password)
         .with_download_path(&request.download_path)
-        .with_headless(request.headless);
+        .with_headless(request.headless)
+        .with_timeout(default_download_timeout());
 
     let mut scraper = EtcScraper::new(config);
 
@@ -768,7 +777,8 @@ async fn process_etc_batch_job(
         // Execute scrape for this account
         let config = ScraperConfig::new(user_id, &account.password)
             .with_download_path(&session_folder)
-            .with_headless(request.headless);
+            .with_headless(request.headless)
+            .with_timeout(default_download_timeout());
 
         let mut scraper = EtcScraper::new(config);
         let result = scraper.execute().await;
