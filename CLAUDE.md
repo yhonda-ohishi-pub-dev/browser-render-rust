@@ -56,14 +56,15 @@ cargo test --test browser_integration_test test_mock_server_standalone -- --noca
 
 ## Docker & Deploy
 
+### 自動デプロイ
+`git push`で自動的にビルド・デプロイが実行される（pre-pushフック）。
+
 ```bash
-# ローカルビルド
-docker build -t ghcr.io/yhonda-ohishi-pub-dev/browser-render-rust:test .
+git push  # → build → push to GHCR → deploy to GCE
+```
 
-# GHCRにpush
-docker push ghcr.io/yhonda-ohishi-pub-dev/browser-render-rust:test
-
-# デプロイスクリプト実行（build → push → GCEデプロイ）
+### 手動デプロイ
+```bash
 ./scripts/deploy.sh
 ```
 
@@ -73,25 +74,26 @@ docker push ghcr.io/yhonda-ohishi-pub-dev/browser-render-rust:test
 gcloud compute scp scripts/gce-setup.sh instance-20251207-115015:~ --zone=asia-northeast1-b
 gcloud compute ssh instance-20251207-115015 --zone=asia-northeast1-b --command="bash ~/gce-setup.sh"
 
-# 2. ローカルの.envをGCEにコピー
+# 2. ローカルの.envをGCEにコピー（GHCR_TOKEN含む）
 gcloud compute scp .env instance-20251207-115015:/tmp/.env --zone=asia-northeast1-b
 gcloud compute ssh instance-20251207-115015 --zone=asia-northeast1-b --command="sudo mv /tmp/.env /opt/browser-render/.env"
-
-# 3. GHCRにログイン（.envにGHCR_TOKENが必要）
-gcloud compute ssh instance-20251207-115015 --zone=asia-northeast1-b --command="grep GHCR_TOKEN /opt/browser-render/.env | cut -d= -f2 | sudo docker login ghcr.io -u yhonda-ohishi-pub-dev --password-stdin"
 ```
 
-### Pre-pushフック
-`git push`時に自動デプロイ（`.githooks/pre-push`）
-```bash
-git config core.hooksPath .githooks  # 有効化済み
-```
+### Docker設定
+- `--network host`: ポート公開なし、localhost:8080でアクセス可能
+- `--shm-size=2g`: Chromium用共有メモリ
+- chromedp/headless-shellベースイメージ使用
 
 ### Cron設定（GCE上）
-10分おきにVehicleデータ取得を実行:
+10分おきにVehicleデータ取得:
 ```bash
 # /etc/cron.d/vehicle-fetch
 */10 * * * * root curl -sf http://localhost:8080/v1/vehicle/data >> /opt/browser-render/logs/vehicle-cron.log 2>&1
+```
+
+### ヘルスチェック
+```bash
+gcloud compute ssh instance-20251207-115015 --zone=asia-northeast1-b --command="curl -sf http://localhost:8080/health"
 ```
 
 ## TODO

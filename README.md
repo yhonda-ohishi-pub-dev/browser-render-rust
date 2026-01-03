@@ -105,6 +105,21 @@ curl http://localhost:8080/v1/job/{job_id}
 curl http://localhost:8080/health
 ```
 
+## Docker & Deploy
+
+```bash
+# 自動デプロイ（pre-pushフック）
+git push  # → build → push to GHCR → deploy to GCE
+
+# 手動デプロイ
+./scripts/deploy.sh
+
+# ヘルスチェック
+gcloud compute ssh instance-20251207-115015 --zone=asia-northeast1-b --command="curl -sf http://localhost:8080/health"
+```
+
+詳細は [CLAUDE.md](CLAUDE.md) を参照。
+
 ## License
 
 MIT
