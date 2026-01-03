@@ -7,6 +7,8 @@ use tonic_web::GrpcWebLayer;
 use tower_http::cors::{Any, CorsLayer};
 use tracing::{error, info};
 
+use super::grpc_web_json::GrpcWebJsonLayer;
+
 use crate::browser::Renderer;
 use crate::config::Config;
 use crate::jobs::{JobManager, JobPriority};
@@ -644,7 +646,7 @@ pub async fn start_grpc_server(
     );
     let server2 = GrpcServer::new(config, storage, renderer, job_manager);
 
-    info!("gRPC server starting on {} (gRPC-web enabled)", address);
+    info!("gRPC server starting on {} (gRPC-web enabled, gRPC-web+json enabled)", address);
 
     let reflection_service = ReflectionBuilder::configure()
         .register_encoded_file_descriptor_set(browser_render::FILE_DESCRIPTOR_SET)
@@ -660,7 +662,8 @@ pub async fn start_grpc_server(
     Server::builder()
         .accept_http1(true) // Required for gRPC-web
         .layer(cors)
-        .layer(GrpcWebLayer::new())
+        .layer(GrpcWebJsonLayer::new()) // JSON mode layer (must be before GrpcWebLayer)
+        .layer(GrpcWebLayer::new())     // Standard gRPC-web (protobuf)
         .add_service(reflection_service)
         .add_service(BrowserRenderServiceServer::new(server))
         .add_service(EtcScraperServiceServer::new(server2))
