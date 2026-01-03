@@ -15,7 +15,7 @@ use tracing::{debug, error, info, warn};
 
 use browser::Renderer;
 use config::{Config, LogFormat, LogRotation};
-use jobs::JobManager;
+use jobs::{start_idle_processor, JobManager};
 use server::{start_http_server, AppState};
 use storage::Storage;
 
@@ -116,6 +116,10 @@ async fn main() -> anyhow::Result<()> {
 
     // Create job manager
     let job_manager = Arc::new(JobManager::new(renderer.clone()));
+
+    // Start idle job processor (processes low-priority jobs when system is idle)
+    start_idle_processor(job_manager.clone());
+    info!("Idle job processor started");
 
     // Create shutdown channel
     let (shutdown_tx, _) = broadcast::channel::<()>(1);

@@ -5,7 +5,7 @@ use axum::{
     extract::{Path, Query, State},
     http::{Method, StatusCode},
     response::IntoResponse,
-    routing::{delete, get},
+    routing::{delete, get, post},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
@@ -14,7 +14,7 @@ use tracing::{error, info};
 
 use crate::browser::Renderer;
 use crate::config::Config;
-use crate::jobs::JobManager;
+use crate::jobs::{EtcScrapeRequest, JobManager, JobPriority};
 use crate::storage::Storage;
 
 /// Shared application state
@@ -37,8 +37,11 @@ pub fn create_router(state: Arc<AppState>) -> Router {
     Router::new()
         // API endpoints
         .route("/v1/vehicle/data", get(handle_vehicle_data))
+        .route("/v1/etc/scrape", post(handle_etc_scrape))
+        .route("/v1/etc/scrape/queue", post(handle_etc_scrape_queue))
         .route("/v1/job/:id", get(handle_job_status))
         .route("/v1/jobs", get(handle_jobs_list))
+        .route("/v1/jobs/queue", get(handle_queue_status))
         .route("/v1/session/check", get(handle_session_check))
         .route("/v1/session/clear", delete(handle_session_clear))
         // Health and metrics
@@ -61,6 +64,31 @@ struct VehicleDataResponse {
 struct JobsListResponse {
     jobs: Vec<crate::jobs::Job>,
     count: usize,
+}
+
+#[derive(Serialize)]
+struct QueueStatusResponse {
+    queue_length: usize,
+    running_jobs: usize,
+    is_idle: bool,
+}
+
+#[derive(Deserialize)]
+struct EtcScrapeRequestBody {
+    user_id: String,
+    password: String,
+    #[serde(default = "default_download_path")]
+    download_path: String,
+    #[serde(default = "default_headless")]
+    headless: bool,
+}
+
+fn default_download_path() -> String {
+    "./downloads".to_string()
+}
+
+fn default_headless() -> bool {
+    true
 }
 
 #[derive(Deserialize)]
@@ -140,6 +168,77 @@ async fn handle_jobs_list(State(state): State<Arc<AppState>>) -> impl IntoRespon
     let count = jobs.len();
 
     Json(JobsListResponse { jobs, count })
+}
+
+/// ETC scrape endpoint - runs immediately
+async fn handle_etc_scrape(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<EtcScrapeRequestBody>,
+) -> impl IntoResponse {
+    let request = EtcScrapeRequest {
+        user_id: body.user_id.clone(),
+        password: body.password,
+        download_path: body.download_path,
+        headless: body.headless,
+    };
+
+    let job_id = state
+        .job_manager
+        .create_etc_job(request, JobPriority::Normal)
+        .await;
+
+    info!("Created ETC scrape job (immediate): {} for user {}", job_id, body.user_id);
+
+    (
+        StatusCode::ACCEPTED,
+        Json(VehicleDataResponse {
+            job_id,
+            status: "pending".to_string(),
+            message: "ETC scrape job created. Use /v1/job/{id} to check status.".to_string(),
+        }),
+    )
+}
+
+/// ETC scrape queue endpoint - runs when idle
+async fn handle_etc_scrape_queue(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<EtcScrapeRequestBody>,
+) -> impl IntoResponse {
+    let request = EtcScrapeRequest {
+        user_id: body.user_id.clone(),
+        password: body.password,
+        download_path: body.download_path,
+        headless: body.headless,
+    };
+
+    let job_id = state
+        .job_manager
+        .create_etc_job(request, JobPriority::Low)
+        .await;
+
+    info!("Created ETC scrape job (queued): {} for user {}", job_id, body.user_id);
+
+    (
+        StatusCode::ACCEPTED,
+        Json(VehicleDataResponse {
+            job_id,
+            status: "queued".to_string(),
+            message: "ETC scrape job queued. Will run when system is idle. Use /v1/job/{id} to check status.".to_string(),
+        }),
+    )
+}
+
+/// Queue status endpoint
+async fn handle_queue_status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let queue_length = state.job_manager.queue_length().await;
+    let running_jobs = state.job_manager.running_job_count().await;
+    let is_idle = state.job_manager.is_idle().await;
+
+    Json(QueueStatusResponse {
+        queue_length,
+        running_jobs,
+        is_idle,
+    })
 }
 
 /// Session check endpoint

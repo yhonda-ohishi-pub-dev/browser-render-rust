@@ -1,0 +1,3 @@
+[submodule "rust-scraper"]
+	path = rust-scraper
+	url = https://github.com/yhonda-ohishi-pub-dev/rust-scraper.git

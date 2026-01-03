@@ -68,6 +68,9 @@ for i in {1..15}; do
     if curl -sf http://localhost:8080/health > /dev/null 2>&1; then
         echo 'Health check passed!'
         docker ps -f name=${CONTAINER_NAME}
+        # Clean up old images
+        echo 'Cleaning up old images...'
+        docker image prune -af --filter 'until=24h'
         exit 0
     fi
     echo \"Waiting... (\$i/15)\"

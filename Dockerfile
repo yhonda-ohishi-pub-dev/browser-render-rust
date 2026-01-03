@@ -9,8 +9,9 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /build
 
-# Copy Cargo files first for dependency caching
+# Copy Cargo files and submodule first for dependency caching
 COPY Cargo.toml Cargo.lock ./
+COPY rust-scraper ./rust-scraper
 
 # Create dummy src to build dependencies
 RUN mkdir -p src && \

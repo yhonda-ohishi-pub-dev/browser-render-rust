@@ -46,6 +46,28 @@ cargo test --test browser_integration_test -- --ignored --nocapture --test-threa
 cargo test --test browser_integration_test test_mock_server_standalone -- --nocapture
 ```
 
+## API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/v1/vehicle/data` | GET | Vehicleデータ取得ジョブ作成 |
+| `/v1/etc/scrape` | POST | ETC明細スクレイプ（即時実行） |
+| `/v1/etc/scrape/queue` | POST | ETC明細スクレイプ（idle時実行） |
+| `/v1/job/:id` | GET | ジョブステータス確認 |
+| `/v1/jobs` | GET | 全ジョブ一覧 |
+| `/v1/jobs/queue` | GET | キュー状態確認 |
+| `/health` | GET | ヘルスチェック |
+
+### ETC Scrape Request Body
+```json
+{
+  "user_id": "xxx",
+  "password": "xxx",
+  "download_path": "./downloads",
+  "headless": true
+}
+```
+
 ## Architecture
 
 - **axum**: HTTP framework
@@ -53,6 +75,7 @@ cargo test --test browser_integration_test test_mock_server_standalone -- --noca
 - **sqlx**: Async SQLite
 - **tokio**: Async runtime
 - **tonic** (optional): gRPC (`--features grpc`)
+- **scraper-service**: ETC明細スクレイパー（workspace member）
 
 ## Docker & Deploy
 
@@ -85,10 +108,25 @@ gcloud compute ssh instance-20251207-115015 --zone=asia-northeast1-b --command="
 - chromedp/headless-shellベースイメージ使用
 
 ### Cron設定（GCE上）
-10分おきにVehicleデータ取得:
+
+Vehicleデータ取得（10分おき）:
 ```bash
 # /etc/cron.d/vehicle-fetch
 */10 * * * * root curl -sf http://localhost:8080/v1/vehicle/data >> /opt/browser-render/logs/vehicle-cron.log 2>&1
+```
+
+ETC明細スクレイプ（任意の時間に設定可能）:
+```bash
+# /etc/cron.d/etc-scrape
+# 毎日6時にキューに追加（idle時に自動実行）
+0 6 * * * root curl -sf -X POST -H "Content-Type: application/json" \
+  -d '{"user_id":"xxx","password":"xxx"}' \
+  http://localhost:8080/v1/etc/scrape/queue >> /opt/browser-render/logs/etc-cron.log 2>&1
+
+# 即時実行したい場合
+# 0 6 * * * root curl -sf -X POST -H "Content-Type: application/json" \
+#   -d '{"user_id":"xxx","password":"xxx"}' \
+#   http://localhost:8080/v1/etc/scrape >> /opt/browser-render/logs/etc-cron.log 2>&1
 ```
 
 ### ヘルスチェック
@@ -102,4 +140,5 @@ gcloud compute ssh instance-20251207-115015 --zone=asia-northeast1-b --command="
 - [x] エラーハンドリングの改善
 - [x] ログ出力の最適化
 - [x] Docker + GCE自動デプロイ
+- [x] ETC明細スクレイパー統合
 - [ ] メトリクス追加
