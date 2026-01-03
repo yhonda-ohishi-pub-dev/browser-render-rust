@@ -5,6 +5,7 @@ RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
     libsqlite3-dev \
+    protobuf-compiler \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
@@ -18,14 +19,18 @@ RUN mkdir -p src && \
     echo "fn main() {}" > src/main.rs && \
     echo "pub fn lib() {}" > src/lib.rs
 
+# Copy proto files for gRPC build
+COPY proto ./proto
+COPY build.rs ./
+
 # Build dependencies (cached layer)
-RUN cargo build --release && rm -rf src
+RUN cargo build --release --features grpc && rm -rf src
 
 # Copy actual source code
 COPY src ./src
 
 # Touch main.rs to invalidate cache for source files only
-RUN touch src/main.rs && cargo build --release
+RUN touch src/main.rs && cargo build --release --features grpc
 
 # Stage 2: Runtime with headless-shell
 FROM chromedp/headless-shell:stable AS headless
@@ -81,4 +86,4 @@ EXPOSE 8080 50051
 
 # Use dumb-init to reap zombie processes
 ENTRYPOINT ["/usr/bin/dumb-init", "--"]
-CMD ["./browser-render", "--server", "http", "--log-format", "json"]
+CMD ["./browser-render", "--server", "both", "--log-format", "json"]
