@@ -76,8 +76,8 @@ cargo test --test browser_integration_test test_mock_server_standalone -- --noca
 ```json
 {
   "accounts": [
-    {"user_id": "user1", "password": "pass1", "name": "ユーザー1"},
-    {"user_id": "user2", "password": "pass2", "name": "ユーザー2"}
+    {"user_id": "user1", "password": "pass1"},
+    {"user_id": "user2", "password": "pass2"}
   ],
   "download_path": "./downloads",
   "headless": true
@@ -88,12 +88,12 @@ cargo test --test browser_integration_test test_mock_server_standalone -- --noca
 
 | 環境変数 | 説明 | 例 |
 |----------|------|-----|
-| `ETC_ACCOUNTS` | アカウント情報（JSON配列） | `[{"user_id":"u1","password":"p1","name":"名前1"}]` |
+| `ETC_ACCOUNTS` | アカウント情報（JSON配列） | `[{"user_id":"u1","password":"p1"}]` |
 | `ETC_DOWNLOAD_PATH` | ダウンロード先パス | `/data/downloads` |
 
 ```bash
 # .envファイル例
-ETC_ACCOUNTS='[{"user_id":"user1","password":"pass1","name":"ユーザー1"},{"user_id":"user2","password":"pass2","name":"ユーザー2"}]'
+ETC_ACCOUNTS='[{"user_id":"user1","password":"pass1"},{"user_id":"user2","password":"pass2"}]'
 ETC_DOWNLOAD_PATH=/data/etc-downloads
 ```
 
