@@ -1,6 +1,9 @@
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Instant;
 
+use tokio::io::AsyncReadExt;
+use tokio_stream::Stream;
 use tonic::{transport::Server, Request, Response, Status};
 use tonic_reflection::server::Builder as ReflectionBuilder;
 use tonic_web::GrpcWebLayer;
@@ -36,6 +39,7 @@ use browser_render::{
     GetJobRequest, GetJobResponse, ListJobsRequest, ListJobsResponse,
     GetQueueStatusRequest, GetQueueStatusResponse,
     ListSessionsRequest, ListSessionsResponse, ListSessionFilesRequest, ListSessionFilesResponse,
+    DownloadFileRequest, DownloadFileChunk,
     Job as ProtoJob, EtcScrapeResult as ProtoEtcScrapeResult, EtcBatchResult as ProtoEtcBatchResult,
     AccountResult as ProtoAccountResult, SessionInfo, FileInfo,
 };
@@ -627,6 +631,98 @@ impl EtcScraperService for GrpcServer {
             session_id: req.session_id,
             files,
         }))
+    }
+
+    type DownloadFileStream = Pin<Box<dyn Stream<Item = Result<DownloadFileChunk, Status>> + Send>>;
+
+    async fn download_file(
+        &self,
+        request: Request<DownloadFileRequest>,
+    ) -> Result<Response<Self::DownloadFileStream>, Status> {
+        let req = request.into_inner();
+        info!(
+            "DownloadFile called for session_id={}, file_name={}",
+            req.session_id, req.file_name
+        );
+
+        // Validate session_id format (YYYYMMDD_HHMMSS)
+        if req.session_id.len() != 15 || req.session_id.chars().nth(8) != Some('_') {
+            return Err(Status::invalid_argument(
+                "Invalid session ID format. Expected YYYYMMDD_HHMMSS",
+            ));
+        }
+
+        // Prevent path traversal
+        if req.session_id.contains("..")
+            || req.session_id.contains('/')
+            || req.session_id.contains('\\')
+            || req.file_name.contains("..")
+            || req.file_name.contains('/')
+            || req.file_name.contains('\\')
+        {
+            return Err(Status::invalid_argument("Invalid session ID or file name"));
+        }
+
+        // Validate file extension (only CSV allowed)
+        if !req.file_name.to_lowercase().ends_with(".csv") {
+            return Err(Status::invalid_argument("Only CSV files can be downloaded"));
+        }
+
+        let download_path = default_download_path();
+        let file_path = std::path::Path::new(&download_path)
+            .join(&req.session_id)
+            .join(&req.file_name);
+
+        if !file_path.is_file() {
+            return Err(Status::not_found(format!(
+                "File not found: {}/{}",
+                req.session_id, req.file_name
+            )));
+        }
+
+        let total_size = match std::fs::metadata(&file_path) {
+            Ok(m) => m.len() as i64,
+            Err(e) => {
+                error!("Failed to get file metadata {:?}: {}", file_path, e);
+                return Err(Status::internal(format!("Failed to read file: {}", e)));
+            }
+        };
+
+        let file_path_owned = file_path.to_path_buf();
+
+        let stream = async_stream::try_stream! {
+            const CHUNK_SIZE: usize = 64 * 1024; // 64KB chunks
+
+            let mut file = tokio::fs::File::open(&file_path_owned).await
+                .map_err(|e| Status::internal(format!("Failed to open file: {}", e)))?;
+
+            let mut buffer = vec![0u8; CHUNK_SIZE];
+            let mut offset: i64 = 0;
+            let mut is_first = true;
+
+            loop {
+                let bytes_read = file.read(&mut buffer).await
+                    .map_err(|e| Status::internal(format!("Failed to read file: {}", e)))?;
+
+                if bytes_read == 0 {
+                    break;
+                }
+
+                let is_last = offset + bytes_read as i64 >= total_size;
+
+                yield DownloadFileChunk {
+                    data: buffer[..bytes_read].to_vec(),
+                    offset,
+                    total_size: if is_first { total_size } else { 0 },
+                    is_last,
+                };
+
+                offset += bytes_read as i64;
+                is_first = false;
+            }
+        };
+
+        Ok(Response::new(Box::pin(stream)))
     }
 }
 

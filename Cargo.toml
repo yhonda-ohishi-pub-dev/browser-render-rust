@@ -27,6 +27,8 @@ http-body-util = { version = "0.1", optional = true }
 bytes = { version = "1", optional = true }
 http-body = { version = "1", optional = true }
 http = { version = "1", optional = true }
+async-stream = { version = "0.3", optional = true }
+tokio-stream = { version = "0.1", optional = true }
 
 # Database
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
@@ -68,7 +70,7 @@ tonic-build = { version = "0.12", optional = true }
 
 [features]
 default = []
-grpc = ["tonic", "tonic-reflection", "tonic-web", "prost", "tonic-build", "http-body-util", "bytes", "http-body", "http"]
+grpc = ["tonic", "tonic-reflection", "tonic-web", "prost", "tonic-build", "http-body-util", "bytes", "http-body", "http", "async-stream", "tokio-stream"]
 
 [dev-dependencies]
 tempfile = "3"

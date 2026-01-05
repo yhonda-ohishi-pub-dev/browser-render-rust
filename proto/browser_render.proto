@@ -33,6 +33,8 @@ service EtcScraperService {
   rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
   // List files in a session
   rpc ListSessionFiles(ListSessionFilesRequest) returns (ListSessionFilesResponse);
+  // Download a file from a session (streaming)
+  rpc DownloadFile(DownloadFileRequest) returns (stream DownloadFileChunk);
 }
 
 message GetVehicleDataRequest {
@@ -225,4 +227,18 @@ message ListSessionFilesResponse {
 message FileInfo {
   string name = 1;
   int64 size = 2;
+}
+
+// Download file request
+message DownloadFileRequest {
+  string session_id = 1;  // Session folder name
+  string file_name = 2;   // File name to download
+}
+
+// Download file chunk (streaming response)
+message DownloadFileChunk {
+  bytes data = 1;         // File chunk data
+  int64 offset = 2;       // Byte offset of this chunk
+  int64 total_size = 3;   // Total file size (sent in first chunk)
+  bool is_last = 4;       // True if this is the last chunk
 }
