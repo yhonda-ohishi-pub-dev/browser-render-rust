@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
+use base64::Engine;
 use bytes::Bytes;
 use http::{header, HeaderValue, Method, Request, Response, StatusCode};
 use http_body_util::{BodyExt, Full};
@@ -36,6 +37,8 @@ struct HandlerInfo {
     #[allow(dead_code)]
     service: String,
     method: String,
+    #[allow(dead_code)]
+    is_streaming: bool,
 }
 
 impl GrpcWebJsonLayer {
@@ -45,65 +48,69 @@ impl GrpcWebJsonLayer {
         // BrowserRenderService methods
         handlers.insert(
             "/browser_render.v1.BrowserRenderService/GetVehicleData".to_string(),
-            HandlerInfo { service: "BrowserRenderService".to_string(), method: "GetVehicleData".to_string() },
+            HandlerInfo { service: "BrowserRenderService".to_string(), method: "GetVehicleData".to_string(), is_streaming: false },
         );
         handlers.insert(
             "/browser_render.v1.BrowserRenderService/CheckSession".to_string(),
-            HandlerInfo { service: "BrowserRenderService".to_string(), method: "CheckSession".to_string() },
+            HandlerInfo { service: "BrowserRenderService".to_string(), method: "CheckSession".to_string(), is_streaming: false },
         );
         handlers.insert(
             "/browser_render.v1.BrowserRenderService/ClearSession".to_string(),
-            HandlerInfo { service: "BrowserRenderService".to_string(), method: "ClearSession".to_string() },
+            HandlerInfo { service: "BrowserRenderService".to_string(), method: "ClearSession".to_string(), is_streaming: false },
         );
         handlers.insert(
             "/browser_render.v1.BrowserRenderService/HealthCheck".to_string(),
-            HandlerInfo { service: "BrowserRenderService".to_string(), method: "HealthCheck".to_string() },
+            HandlerInfo { service: "BrowserRenderService".to_string(), method: "HealthCheck".to_string(), is_streaming: false },
         );
 
         // EtcScraperService methods
         handlers.insert(
             "/browser_render.v1.EtcScraperService/EtcScrape".to_string(),
-            HandlerInfo { service: "EtcScraperService".to_string(), method: "EtcScrape".to_string() },
+            HandlerInfo { service: "EtcScraperService".to_string(), method: "EtcScrape".to_string(), is_streaming: false },
         );
         handlers.insert(
             "/browser_render.v1.EtcScraperService/EtcScrapeQueue".to_string(),
-            HandlerInfo { service: "EtcScraperService".to_string(), method: "EtcScrapeQueue".to_string() },
+            HandlerInfo { service: "EtcScraperService".to_string(), method: "EtcScrapeQueue".to_string(), is_streaming: false },
         );
         handlers.insert(
             "/browser_render.v1.EtcScraperService/EtcScrapeBatch".to_string(),
-            HandlerInfo { service: "EtcScraperService".to_string(), method: "EtcScrapeBatch".to_string() },
+            HandlerInfo { service: "EtcScraperService".to_string(), method: "EtcScrapeBatch".to_string(), is_streaming: false },
         );
         handlers.insert(
             "/browser_render.v1.EtcScraperService/EtcScrapeBatchQueue".to_string(),
-            HandlerInfo { service: "EtcScraperService".to_string(), method: "EtcScrapeBatchQueue".to_string() },
+            HandlerInfo { service: "EtcScraperService".to_string(), method: "EtcScrapeBatchQueue".to_string(), is_streaming: false },
         );
         handlers.insert(
             "/browser_render.v1.EtcScraperService/EtcScrapeBatchEnv".to_string(),
-            HandlerInfo { service: "EtcScraperService".to_string(), method: "EtcScrapeBatchEnv".to_string() },
+            HandlerInfo { service: "EtcScraperService".to_string(), method: "EtcScrapeBatchEnv".to_string(), is_streaming: false },
         );
         handlers.insert(
             "/browser_render.v1.EtcScraperService/EtcScrapeBatchEnvQueue".to_string(),
-            HandlerInfo { service: "EtcScraperService".to_string(), method: "EtcScrapeBatchEnvQueue".to_string() },
+            HandlerInfo { service: "EtcScraperService".to_string(), method: "EtcScrapeBatchEnvQueue".to_string(), is_streaming: false },
         );
         handlers.insert(
             "/browser_render.v1.EtcScraperService/GetJob".to_string(),
-            HandlerInfo { service: "EtcScraperService".to_string(), method: "GetJob".to_string() },
+            HandlerInfo { service: "EtcScraperService".to_string(), method: "GetJob".to_string(), is_streaming: false },
         );
         handlers.insert(
             "/browser_render.v1.EtcScraperService/ListJobs".to_string(),
-            HandlerInfo { service: "EtcScraperService".to_string(), method: "ListJobs".to_string() },
+            HandlerInfo { service: "EtcScraperService".to_string(), method: "ListJobs".to_string(), is_streaming: false },
         );
         handlers.insert(
             "/browser_render.v1.EtcScraperService/GetQueueStatus".to_string(),
-            HandlerInfo { service: "EtcScraperService".to_string(), method: "GetQueueStatus".to_string() },
+            HandlerInfo { service: "EtcScraperService".to_string(), method: "GetQueueStatus".to_string(), is_streaming: false },
         );
         handlers.insert(
             "/browser_render.v1.EtcScraperService/ListSessions".to_string(),
-            HandlerInfo { service: "EtcScraperService".to_string(), method: "ListSessions".to_string() },
+            HandlerInfo { service: "EtcScraperService".to_string(), method: "ListSessions".to_string(), is_streaming: false },
         );
         handlers.insert(
             "/browser_render.v1.EtcScraperService/ListSessionFiles".to_string(),
-            HandlerInfo { service: "EtcScraperService".to_string(), method: "ListSessionFiles".to_string() },
+            HandlerInfo { service: "EtcScraperService".to_string(), method: "ListSessionFiles".to_string(), is_streaming: false },
+        );
+        handlers.insert(
+            "/browser_render.v1.EtcScraperService/DownloadFile".to_string(),
+            HandlerInfo { service: "EtcScraperService".to_string(), method: "DownloadFile".to_string(), is_streaming: true },
         );
 
         GrpcWebJsonLayer {
@@ -289,6 +296,11 @@ where
                 return Ok(create_grpc_json_response(&handler_info.method, &[]));
             }
 
+            // Handle streaming responses (multiple frames)
+            if handler_info.is_streaming {
+                return Ok(handle_streaming_response(&handler_info.method, &resp_bytes, resp_parts));
+            }
+
             let flag = resp_bytes[0];
             let len = u32::from_be_bytes([resp_bytes[1], resp_bytes[2], resp_bytes[3], resp_bytes[4]]) as usize;
 
@@ -348,6 +360,91 @@ where
             }
         })
     }
+}
+
+/// Handle streaming response (for DownloadFile etc.)
+/// Streaming responses contain multiple gRPC frames concatenated together.
+/// We convert each frame to JSON and output as a JSON array containing all chunks.
+fn handle_streaming_response(
+    method: &str,
+    resp_bytes: &Bytes,
+    resp_parts: http::response::Parts,
+) -> Response<UnsyncBoxBody> {
+    let mut chunks: Vec<serde_json::Value> = Vec::new();
+    let mut pos = 0;
+    let mut trailer_bytes: Option<Bytes> = None;
+
+    // Parse all frames from the response
+    while pos + 5 <= resp_bytes.len() {
+        let flag = resp_bytes[pos];
+        let len = u32::from_be_bytes([
+            resp_bytes[pos + 1],
+            resp_bytes[pos + 2],
+            resp_bytes[pos + 3],
+            resp_bytes[pos + 4],
+        ]) as usize;
+
+        if pos + 5 + len > resp_bytes.len() {
+            warn!("Incomplete frame at position {}", pos);
+            break;
+        }
+
+        if flag == 0x80 {
+            // Trailer frame - store and stop processing
+            trailer_bytes = Some(resp_bytes.slice(pos..pos + 5 + len));
+            break;
+        } else if flag == 0 {
+            // Data frame - convert to JSON
+            let proto_data = &resp_bytes[pos + 5..pos + 5 + len];
+            match convert_proto_to_json(method, proto_data) {
+                Ok(json_str) => {
+                    if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&json_str) {
+                        chunks.push(json_value);
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to convert streaming chunk to JSON: {}", e);
+                }
+            }
+        }
+
+        pos += 5 + len;
+    }
+
+    // Build response JSON array
+    let json_array = serde_json::to_string(&chunks).unwrap_or_else(|_| "[]".to_string());
+    debug!("Streaming response JSON: {} chunks", chunks.len());
+
+    // Create gRPC-Web JSON frame
+    let mut json_frame = Vec::with_capacity(5 + json_array.len() + 50);
+    json_frame.push(0); // Flag: 0 = data frame
+    json_frame.extend_from_slice(&(json_array.len() as u32).to_be_bytes());
+    json_frame.extend_from_slice(json_array.as_bytes());
+
+    // Add trailers
+    if let Some(trailers) = trailer_bytes {
+        json_frame.extend_from_slice(&trailers);
+    } else {
+        // Add default OK trailers
+        let trailers = "grpc-status:0\r\n";
+        json_frame.push(0x80); // Flag: trailer frame
+        json_frame.extend_from_slice(&(trailers.len() as u32).to_be_bytes());
+        json_frame.extend_from_slice(trailers.as_bytes());
+    }
+
+    let mut response = Response::new(boxed_body(Full::new(Bytes::from(json_frame))));
+    *response.status_mut() = resp_parts.status;
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/grpc-web+json"),
+    );
+    // Copy CORS headers
+    for (key, value) in resp_parts.headers.iter() {
+        if key.as_str().starts_with("access-control") {
+            response.headers_mut().insert(key.clone(), value.clone());
+        }
+    }
+    response
 }
 
 fn create_error_response(message: &str) -> Response<UnsyncBoxBody> {
@@ -507,6 +604,14 @@ fn convert_json_to_proto(method: &str, json_bytes: &[u8]) -> Result<Vec<u8>, Str
                 session_id: req.session_id.unwrap_or_default(),
             }.encode_to_vec())
         }
+        "DownloadFile" => {
+            let req: DownloadFileJson = serde_json::from_slice(json_bytes)
+                .map_err(|e| format!("JSON parse error: {}", e))?;
+            Ok(browser_render::DownloadFileRequest {
+                session_id: req.session_id.unwrap_or_default(),
+                file_name: req.file_name.unwrap_or_default(),
+            }.encode_to_vec())
+        }
         _ => Err(format!("Unknown method: {}", method)),
     }
 }
@@ -623,6 +728,18 @@ fn convert_proto_to_json(method: &str, proto_bytes: &[u8]) -> Result<String, Str
             };
             serde_json::to_string(&json).map_err(|e| format!("JSON serialize error: {}", e))
         }
+        "DownloadFile" => {
+            // Streaming response - each chunk is a DownloadFileChunk
+            let chunk = browser_render::DownloadFileChunk::decode(proto_bytes)
+                .map_err(|e| format!("Protobuf decode error: {}", e))?;
+            let json = DownloadFileChunkJson {
+                data: base64::engine::general_purpose::STANDARD.encode(&chunk.data),
+                offset: chunk.offset,
+                total_size: chunk.total_size,
+                is_last: chunk.is_last,
+            };
+            serde_json::to_string(&json).map_err(|e| format!("JSON serialize error: {}", e))
+        }
         _ => Err(format!("Unknown method: {}", method)),
     }
 }
@@ -721,6 +838,12 @@ struct ListJobsJson {
 #[derive(Deserialize)]
 struct ListSessionFilesJson {
     session_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct DownloadFileJson {
+    session_id: Option<String>,
+    file_name: Option<String>,
 }
 
 // Response types
@@ -857,4 +980,12 @@ struct AccountResultJson {
     csv_size: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
+}
+
+#[derive(Serialize)]
+struct DownloadFileChunkJson {
+    data: String,   // Base64 encoded data
+    offset: i64,
+    total_size: i64,
+    is_last: bool,
 }
