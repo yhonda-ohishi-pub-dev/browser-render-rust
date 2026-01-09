@@ -2,7 +2,7 @@ use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc, offset::FixedOffset};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tokio::time::{sleep, Duration};
@@ -234,6 +234,12 @@ impl JobManager {
         }
     }
 
+    /// Format current timestamp in JST (Japan Standard Time, UTC+9)
+    fn format_jst_timestamp() -> String {
+        let jst = FixedOffset::east_opt(9 * 3600).unwrap(); // JST = UTC+9
+        Utc::now().with_timezone(&jst).format("%Y%m%d_%H%M%S").to_string()
+    }
+
     /// Check if the system is idle (no jobs running)
     pub async fn is_idle(&self) -> bool {
         let count = self.running_count.read().await;
@@ -366,11 +372,11 @@ impl JobManager {
             })
             .collect();
 
-        // Create session folder with timestamp
+        // Create session folder with timestamp (JST)
         let session_folder = format!(
             "{}/{}",
             request.download_path,
-            Utc::now().format("%Y%m%d_%H%M%S")
+            Self::format_jst_timestamp()
         );
 
         let job = Job {

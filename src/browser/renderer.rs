@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use chrono::Utc;
+use chrono::{Utc, offset::FixedOffset};
 use chromiumoxide::browser::{Browser, BrowserConfig};
 use chromiumoxide::cdp::browser_protocol::network::CookieParam;
 use chromiumoxide::page::ScreenshotParams;
@@ -704,7 +704,8 @@ impl Renderer {
 
     /// Save raw data to JSON file
     async fn save_raw_data(&self, raw_data: &[serde_json::Value]) {
-        let timestamp = Utc::now().format("%Y%m%d_%H%M%S");
+        let jst = FixedOffset::east_opt(9 * 3600).unwrap(); // JST = UTC+9
+        let timestamp = Utc::now().with_timezone(&jst).format("%Y%m%d_%H%M%S");
         let filename = format!("./data/vehicles_{}.json", timestamp);
 
         // Create data directory (non-critical, logging handled later if file write fails)
