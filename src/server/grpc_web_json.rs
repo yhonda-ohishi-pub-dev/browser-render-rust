@@ -11,10 +11,12 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use base64::Engine;
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut, Buf};
 use http::{header, HeaderValue, Method, Request, Response, StatusCode};
-use http_body_util::{BodyExt, Full};
+use http_body::Frame;
+use http_body_util::{BodyExt, Full, StreamBody};
 use futures::future::BoxFuture;
+use futures::StreamExt;
 use prost::Message;
 use serde::{Deserialize, Serialize};
 use tower::{Layer, Service};
@@ -156,6 +158,7 @@ where
         .boxed_unsync()
 }
 
+
 impl<S, ReqBody, ResBody> Service<Request<ReqBody>> for GrpcWebJsonService<S>
 where
     S: Service<Request<UnsyncBoxBody>, Response = Response<ResBody>> + Clone + Send + 'static,
@@ -281,7 +284,19 @@ where
             // Call inner service
             let response = inner.call(new_req).await?;
 
-            // Convert response back to JSON
+            // For streaming RPCs, handle response without buffering the entire body
+            if handler_info.is_streaming {
+                info!("Handling streaming RPC: {}", handler_info.method);
+                // Create a minimal resp_parts for CORS headers
+                let resp_parts = http::response::Response::new(()).into_parts().0;
+                return Ok(handle_streaming_response_live(
+                    handler_info.method.clone(),
+                    response,
+                    resp_parts,
+                ));
+            }
+
+            // For non-streaming RPCs, collect the response body
             let (resp_parts, resp_body) = response.into_parts();
             let resp_bytes = match resp_body.collect().await {
                 Ok(collected) => collected.to_bytes(),
@@ -294,11 +309,6 @@ where
             // Parse gRPC-Web response frame
             if resp_bytes.len() < 5 {
                 return Ok(create_grpc_json_response(&handler_info.method, &[]));
-            }
-
-            // Handle streaming responses (multiple frames)
-            if handler_info.is_streaming {
-                return Ok(handle_streaming_response(&handler_info.method, &resp_bytes, resp_parts));
             }
 
             let flag = resp_bytes[0];
@@ -362,84 +372,152 @@ where
     }
 }
 
-/// Handle streaming response (for DownloadFile etc.)
-/// Streaming responses contain multiple gRPC frames concatenated together.
-/// We convert each frame to JSON and output as a JSON array containing all chunks.
-fn handle_streaming_response(
-    method: &str,
-    resp_bytes: &Bytes,
-    resp_parts: http::response::Parts,
-) -> Response<UnsyncBoxBody> {
-    let mut chunks: Vec<serde_json::Value> = Vec::new();
-    let mut pos = 0;
-    let mut trailer_bytes: Option<Bytes> = None;
+/// State for streaming response processing
+struct StreamingState<B> {
+    body: std::pin::Pin<Box<B>>,
+    buffer: BytesMut,
+    method: String,
+    sent_trailer: bool,
+    finished: bool,
+}
 
-    // Parse all frames from the response
-    while pos + 5 <= resp_bytes.len() {
-        let flag = resp_bytes[pos];
-        let len = u32::from_be_bytes([
-            resp_bytes[pos + 1],
-            resp_bytes[pos + 2],
-            resp_bytes[pos + 3],
-            resp_bytes[pos + 4],
-        ]) as usize;
+/// Handle streaming response with true streaming (for DownloadFile etc.)
+/// Each gRPC frame is converted to JSON and streamed immediately to the client.
+fn handle_streaming_response_live<B>(
+    method: String,
+    response: Response<B>,
+    resp_parts_ref: http::response::Parts,
+) -> Response<UnsyncBoxBody>
+where
+    B: http_body::Body<Data = Bytes> + Send + 'static,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
+    let (_orig_parts, resp_body) = response.into_parts();
 
-        if pos + 5 + len > resp_bytes.len() {
-            warn!("Incomplete frame at position {}", pos);
-            break;
+    // Initial state for the stream
+    let initial_state = StreamingState {
+        body: Box::pin(resp_body),
+        buffer: BytesMut::new(),
+        method,
+        sent_trailer: false,
+        finished: false,
+    };
+
+    // Create a stream using unfold to maintain Send bound
+    let stream = futures::stream::unfold(initial_state, |mut state| async move {
+        if state.finished {
+            return None;
         }
 
-        if flag == 0x80 {
-            // Trailer frame - store and stop processing
-            trailer_bytes = Some(resp_bytes.slice(pos..pos + 5 + len));
-            break;
-        } else if flag == 0 {
-            // Data frame - convert to JSON
-            let proto_data = &resp_bytes[pos + 5..pos + 5 + len];
-            match convert_proto_to_json(method, proto_data) {
-                Ok(json_str) => {
-                    if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&json_str) {
-                        chunks.push(json_value);
+        // Try to extract complete frames from buffer first
+        while state.buffer.len() >= 5 {
+            let flag = state.buffer[0];
+            let len = u32::from_be_bytes([
+                state.buffer[1], state.buffer[2], state.buffer[3], state.buffer[4]
+            ]) as usize;
+
+            if state.buffer.len() < 5 + len {
+                // Frame not complete yet, need more data
+                break;
+            }
+
+            if flag == 0x80 {
+                // Trailer frame - output as-is
+                let frame_data = state.buffer.split_to(5 + len);
+                state.sent_trailer = true;
+                return Some((Ok(Frame::data(frame_data.freeze())), state));
+            } else if flag == 0 {
+                // Data frame - convert to JSON
+                let proto_data = state.buffer[5..5 + len].to_vec();
+                state.buffer.advance(5 + len);
+
+                match convert_proto_to_json(&state.method, &proto_data) {
+                    Ok(json_str) => {
+                        // Create gRPC-Web JSON frame
+                        let mut json_frame = Vec::with_capacity(5 + json_str.len());
+                        json_frame.push(0); // Flag: 0 = data frame
+                        json_frame.extend_from_slice(&(json_str.len() as u32).to_be_bytes());
+                        json_frame.extend_from_slice(json_str.as_bytes());
+                        debug!("Streaming JSON chunk: {} bytes", json_str.len());
+                        return Some((Ok(Frame::data(Bytes::from(json_frame))), state));
+                    }
+                    Err(e) => {
+                        error!("Failed to convert streaming chunk to JSON: {}", e);
+                        // Continue to next frame
                     }
                 }
-                Err(e) => {
-                    error!("Failed to convert streaming chunk to JSON: {}", e);
-                }
+            } else {
+                // Unknown frame type, skip
+                warn!("Unknown gRPC frame type: {}", flag);
+                state.buffer.advance(5 + len);
             }
         }
 
-        pos += 5 + len;
-    }
+        // Need more data from the body
+        match state.body.as_mut().frame().await {
+            Some(Ok(frame)) => {
+                if let Some(data) = frame.data_ref() {
+                    state.buffer.extend_from_slice(data);
+                }
+                // Recurse to process any complete frames
+                // Return a placeholder to continue iteration
+                Some((Ok(Frame::data(Bytes::new())), state))
+            }
+            Some(Err(e)) => {
+                error!("Stream error: {:?}", e.into());
+                state.finished = true;
+                // Send final trailer if not sent
+                if !state.sent_trailer {
+                    let trailers = "grpc-status:2\r\ngrpc-message:Stream error\r\n";
+                    let mut trailer_frame = Vec::with_capacity(5 + trailers.len());
+                    trailer_frame.push(0x80);
+                    trailer_frame.extend_from_slice(&(trailers.len() as u32).to_be_bytes());
+                    trailer_frame.extend_from_slice(trailers.as_bytes());
+                    return Some((Ok(Frame::data(Bytes::from(trailer_frame))), state));
+                }
+                None
+            }
+            None => {
+                // Stream ended
+                state.finished = true;
+                if !state.sent_trailer {
+                    let trailers = "grpc-status:0\r\n";
+                    let mut trailer_frame = Vec::with_capacity(5 + trailers.len());
+                    trailer_frame.push(0x80);
+                    trailer_frame.extend_from_slice(&(trailers.len() as u32).to_be_bytes());
+                    trailer_frame.extend_from_slice(trailers.as_bytes());
+                    state.sent_trailer = true;
+                    return Some((Ok(Frame::data(Bytes::from(trailer_frame))), state));
+                }
+                debug!("Streaming response completed");
+                None
+            }
+        }
+    })
+    // Filter out empty frames (used for continuation)
+    .filter_map(|result: Result<Frame<Bytes>, std::convert::Infallible>| async move {
+        match result {
+            Ok(frame) => {
+                if let Some(data) = frame.data_ref() {
+                    if data.is_empty() {
+                        return None; // Skip empty continuation frames
+                    }
+                }
+                Some(Ok(frame))
+            }
+            Err(e) => Some(Err(e)),
+        }
+    });
 
-    // Build response JSON array
-    let json_array = serde_json::to_string(&chunks).unwrap_or_else(|_| "[]".to_string());
-    debug!("Streaming response JSON: {} chunks", chunks.len());
-
-    // Create gRPC-Web JSON frame
-    let mut json_frame = Vec::with_capacity(5 + json_array.len() + 50);
-    json_frame.push(0); // Flag: 0 = data frame
-    json_frame.extend_from_slice(&(json_array.len() as u32).to_be_bytes());
-    json_frame.extend_from_slice(json_array.as_bytes());
-
-    // Add trailers
-    if let Some(trailers) = trailer_bytes {
-        json_frame.extend_from_slice(&trailers);
-    } else {
-        // Add default OK trailers
-        let trailers = "grpc-status:0\r\n";
-        json_frame.push(0x80); // Flag: trailer frame
-        json_frame.extend_from_slice(&(trailers.len() as u32).to_be_bytes());
-        json_frame.extend_from_slice(trailers.as_bytes());
-    }
-
-    let mut response = Response::new(boxed_body(Full::new(Bytes::from(json_frame))));
-    *response.status_mut() = resp_parts.status;
+    let body = StreamBody::new(stream);
+    let mut response = Response::new(boxed_body(body));
+    *response.status_mut() = resp_parts_ref.status;
     response.headers_mut().insert(
         header::CONTENT_TYPE,
         HeaderValue::from_static("application/grpc-web+json"),
     );
     // Copy CORS headers
-    for (key, value) in resp_parts.headers.iter() {
+    for (key, value) in resp_parts_ref.headers.iter() {
         if key.as_str().starts_with("access-control") {
             response.headers_mut().insert(key.clone(), value.clone());
         }
