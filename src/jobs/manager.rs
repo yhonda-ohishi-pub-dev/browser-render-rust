@@ -567,16 +567,9 @@ async fn process_vehicle_job(
         headless: config.browser_headless,
         debug: config.browser_debug,
         session_ttl_secs: config.session_ttl.as_secs(),
-        grpc_url: if config.rust_logi_url.is_empty() {
-            None
-        } else {
-            Some(config.rust_logi_url.clone())
-        },
-        grpc_organization_id: if config.rust_logi_organization_id.is_empty() {
-            None
-        } else {
-            Some(config.rust_logi_organization_id.clone())
-        },
+        // gRPC送信はmanager.rs側で行うので、scraper側には渡さない
+        grpc_url: None,
+        grpc_organization_id: None,
     };
 
     // Create and initialize scraper
@@ -658,6 +651,32 @@ async fn process_vehicle_job(
     });
 }
 
+/// Get ID token from GCE metadata server for Cloud Run authentication
+#[cfg(feature = "grpc")]
+async fn get_gce_id_token(audience: &str) -> Result<String, String> {
+    let metadata_url = format!(
+        "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience={}",
+        audience
+    );
+
+    let client = reqwest::Client::new();
+    let response = client
+        .get(&metadata_url)
+        .header("Metadata-Flavor", "Google")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch ID token: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("Metadata server returned status: {}", response.status()));
+    }
+
+    response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read ID token: {}", e))
+}
+
 /// Send raw data to rust-logi via gRPC
 #[cfg(feature = "grpc")]
 async fn send_to_rust_logi(
@@ -678,6 +697,22 @@ async fn send_to_rust_logi(
         raw_data.len(),
         config.rust_logi_url
     );
+
+    // Get ID token for Cloud Run authentication (only for HTTPS URLs)
+    let id_token = if config.rust_logi_url.starts_with("https://") {
+        match get_gce_id_token(&config.rust_logi_url).await {
+            Ok(token) => {
+                info!("Got ID token for Cloud Run authentication");
+                Some(token)
+            }
+            Err(e) => {
+                warn!("Failed to get ID token (not running on GCE?): {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     // Create gRPC client with TLS for HTTPS URLs
     let channel = if config.rust_logi_url.starts_with("https://") {
@@ -768,8 +803,20 @@ async fn send_to_rust_logi(
 
     info!("Converted {} records to Dtakolog messages", dtakologs.len());
 
-    // Create request with organization ID header
+    // Create request with headers
     let mut request = Request::new(BulkCreateDtakologsRequest { dtakologs });
+
+    // Add ID token for Cloud Run authentication
+    if let Some(ref token) = id_token {
+        let auth_value = format!("Bearer {}", token);
+        request.metadata_mut().insert(
+            "authorization",
+            MetadataValue::try_from(&auth_value)
+                .map_err(|e| format!("Invalid authorization header: {}", e))?,
+        );
+    }
+
+    // Add organization ID header
     if !config.rust_logi_organization_id.is_empty() {
         request.metadata_mut().insert(
             "x-organization-id",
