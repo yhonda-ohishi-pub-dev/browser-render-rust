@@ -126,7 +126,7 @@ async fn main() -> anyhow::Result<()> {
     info!("Browser renderer initialized successfully");
 
     // Create job manager
-    let job_manager = Arc::new(JobManager::new(renderer.clone()));
+    let job_manager = Arc::new(JobManager::new(config.clone()));
 
     // Start idle job processor (processes low-priority jobs when system is idle)
     start_idle_processor(job_manager.clone());

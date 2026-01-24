@@ -6,10 +6,11 @@ use chrono::{DateTime, Utc, offset::FixedOffset};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tokio::time::{sleep, Duration};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
-use crate::browser::{HonoApiResponse, Renderer};
+use crate::browser::HonoApiResponse;
+use crate::config::Config;
 
 /// Job type enum
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -219,17 +220,17 @@ struct QueuedJob {
 pub struct JobManager {
     jobs: Arc<RwLock<HashMap<String, Job>>>,
     queue: Arc<RwLock<VecDeque<QueuedJob>>>,
-    renderer: Arc<Renderer>,
+    config: Arc<Config>,
     running_count: Arc<RwLock<usize>>,
 }
 
 impl JobManager {
     /// Create a new job manager
-    pub fn new(renderer: Arc<Renderer>) -> Self {
+    pub fn new(config: Arc<Config>) -> Self {
         JobManager {
             jobs: Arc::new(RwLock::new(HashMap::new())),
             queue: Arc::new(RwLock::new(VecDeque::new())),
-            renderer,
+            config,
             running_count: Arc::new(RwLock::new(0)),
         }
     }
@@ -281,12 +282,12 @@ impl JobManager {
 
         // Start processing in background
         let jobs = self.jobs.clone();
-        let renderer = self.renderer.clone();
+        let config = self.config.clone();
         let running_count = self.running_count.clone();
         let job_id_clone = job_id.clone();
 
         tokio::spawn(async move {
-            process_vehicle_job(jobs, renderer, running_count, job_id_clone).await;
+            process_vehicle_job(jobs, config, running_count, job_id_clone).await;
         });
 
         job_id
@@ -531,13 +532,15 @@ impl JobManager {
     }
 }
 
-/// Process a vehicle job in the background
+/// Process a vehicle job in the background using DtakologScraper
 async fn process_vehicle_job(
     jobs: Arc<RwLock<HashMap<String, Job>>>,
-    renderer: Arc<Renderer>,
+    config: Arc<Config>,
     running_count: Arc<RwLock<usize>>,
     job_id: String,
 ) {
+    use scraper_service::{DtakologConfig, DtakologScraper};
+
     // Increment running count
     {
         let mut count = running_count.write().await;
@@ -554,15 +557,50 @@ async fn process_vehicle_job(
         }
     }
 
-    // Call the renderer with fixed parameters
-    let result = renderer
-        .get_vehicle_data(
-            "",         // Session ID
-            "00000000", // Branch ID
-            "0",        // Filter ID
-            false,      // Force login
-        )
-        .await;
+    // Create DtakologScraper config from app config
+    let dtakolog_config = DtakologConfig {
+        comp_id: config.comp_id.clone(),
+        user_name: config.user_name.clone(),
+        user_pass: config.user_pass.clone(),
+        branch_id: "00000000".to_string(),
+        filter_id: "0".to_string(),
+        headless: config.browser_headless,
+        debug: config.browser_debug,
+        session_ttl_secs: config.session_ttl.as_secs(),
+        grpc_url: if config.rust_logi_url.is_empty() {
+            None
+        } else {
+            Some(config.rust_logi_url.clone())
+        },
+        grpc_organization_id: if config.rust_logi_organization_id.is_empty() {
+            None
+        } else {
+            Some(config.rust_logi_organization_id.clone())
+        },
+    };
+
+    // Create and initialize scraper
+    let mut scraper = DtakologScraper::new(dtakolog_config);
+
+    let result = async {
+        scraper.initialize().await?;
+        scraper.scrape(None, false).await
+    }
+    .await;
+
+    // Send to gRPC if enabled and data was retrieved
+    let hono_response = match &result {
+        Ok(scrape_result) if !config.rust_logi_url.is_empty() => {
+            match send_to_rust_logi(&config, &scrape_result.raw_data).await {
+                Ok(resp) => Some(resp),
+                Err(e) => {
+                    warn!("Failed to send to rust-logi: {}", e);
+                    None
+                }
+            }
+        }
+        _ => None,
+    };
 
     // Update job with results
     {
@@ -571,19 +609,19 @@ async fn process_vehicle_job(
             job.completed_at = Some(Utc::now());
 
             match result {
-                Ok((vehicles, _session_id, hono_response)) => {
+                Ok(scrape_result) => {
                     job.status = JobStatus::Completed;
-                    job.vehicle_count = Some(vehicles.len() as i32);
+                    job.vehicle_count = Some(scrape_result.vehicles.len() as i32);
                     job.hono_response = hono_response.clone();
                     info!(
                         "Vehicle job {} completed successfully with {} vehicles",
                         job_id,
-                        vehicles.len()
+                        scrape_result.vehicles.len()
                     );
 
                     if let Some(ref resp) = hono_response {
                         info!(
-                            "Hono API Response for job {} - Success: {}, Records: {}/{}",
+                            "rust-logi Response for job {} - Success: {}, Records: {}/{}",
                             job_id, resp.success, resp.records_added, resp.total_records
                         );
                     }
@@ -595,6 +633,11 @@ async fn process_vehicle_job(
                 }
             }
         }
+    }
+
+    // Close scraper
+    if let Err(e) = scraper.close().await {
+        warn!("Failed to close scraper: {}", e);
     }
 
     // Decrement running count
@@ -613,6 +656,162 @@ async fn process_vehicle_job(
         jobs_write.remove(&job_id_cleanup);
         info!("Job {} cleaned up", job_id_cleanup);
     });
+}
+
+/// Send raw data to rust-logi via gRPC
+#[cfg(feature = "grpc")]
+async fn send_to_rust_logi(
+    config: &Config,
+    raw_data: &[serde_json::Value],
+) -> Result<HonoApiResponse, String> {
+    use crate::logi::dtakologs::dtakologs_service_client::DtakologsServiceClient;
+    use crate::logi::dtakologs::{BulkCreateDtakologsRequest, Dtakolog};
+    use tonic::metadata::MetadataValue;
+    use tonic::Request;
+
+    if config.rust_logi_url.is_empty() {
+        return Err("RUST_LOGI_URL not configured".to_string());
+    }
+
+    info!(
+        "send_to_rust_logi: Sending {} records to {}",
+        raw_data.len(),
+        config.rust_logi_url
+    );
+
+    // Create gRPC client
+    let channel = tonic::transport::Channel::from_shared(config.rust_logi_url.clone())
+        .map_err(|e| format!("Invalid URL: {}", e))?
+        .connect()
+        .await
+        .map_err(|e| format!("Connection failed: {}", e))?;
+
+    let mut client = DtakologsServiceClient::new(channel);
+
+    // Convert raw data to Dtakolog messages
+    let dtakologs: Vec<Dtakolog> = raw_data
+        .iter()
+        .filter_map(|v| {
+            let obj = v.as_object()?;
+            Some(Dtakolog {
+                r#type: obj.get("__type")?.as_str()?.to_string(),
+                address_disp_c: obj.get("AddressDispC").and_then(|v| v.as_str()).map(String::from),
+                address_disp_p: obj.get("AddressDispP").and_then(|v| v.as_str()).map(String::from),
+                all_state: obj.get("AllState").and_then(|v| v.as_str()).map(String::from),
+                all_state_ex: obj.get("AllStateEx").and_then(|v| v.as_str()).map(String::from),
+                all_state_font_color: obj.get("AllStateFontColor").and_then(|v| v.as_str()).map(String::from),
+                all_state_font_color_index: obj.get("AllStateFontColorIndex").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                all_state_ryout_color: obj.get("AllStateRyoutColor").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                branch_cd: obj.get("BranchCD").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                branch_name: obj.get("BranchName").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                comu_date_time: obj.get("ComuDateTime").and_then(|v| v.as_str()).map(String::from),
+                current_work_cd: obj.get("CurrentWorkCD").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                current_work_name: obj.get("CurrentWorkName").and_then(|v| v.as_str()).map(String::from),
+                data_date_time: convert_data_date_time(obj.get("DataDateTime").and_then(|v| v.as_str()).unwrap_or("")),
+                data_filter_type: obj.get("DataFilterType").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                disp_flag: obj.get("DispFlag").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                driver_cd: obj.get("DriverCD").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                driver_name: obj.get("DriverName").and_then(|v| v.as_str()).map(String::from),
+                event_val: obj.get("EventVal").and_then(|v| v.as_str()).map(String::from),
+                gps_direction: obj.get("GPSDirection").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                gps_enable: obj.get("GPSEnable").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                gps_lati_and_long: obj.get("GPSLatiAndLong").and_then(|v| v.as_str()).map(String::from),
+                gps_latitude: obj.get("GPSLatitude").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                gps_longitude: obj.get("GPSLongitude").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                gps_satellite_num: obj.get("GPSSatelliteNum").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                odometer: obj.get("ODOMeter").and_then(|v| v.as_str()).map(String::from),
+                operation_state: obj.get("OperationState").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                recive_event_type: obj.get("ReciveEventType").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                recive_packet_type: obj.get("RecivePacketType").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                recive_type_color_name: obj.get("ReciveTypeColorName").and_then(|v| v.as_str()).map(String::from),
+                recive_type_name: obj.get("ReciveTypeName").and_then(|v| v.as_str()).map(String::from),
+                recive_work_cd: obj.get("ReciveWorkCD").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                revo: obj.get("Revo").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                setting_temp: obj.get("SettingTemp").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                setting_temp1: obj.get("SettingTemp1").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                setting_temp3: obj.get("SettingTemp3").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                setting_temp4: obj.get("SettingTemp4").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                speed: obj.get("Speed").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                start_work_date_time: obj.get("StartWorkDateTime").and_then(|v| v.as_str()).map(String::from),
+                state: obj.get("State").and_then(|v| v.as_str()).map(String::from),
+                state1: obj.get("State1").and_then(|v| v.as_str()).map(String::from),
+                state2: obj.get("State2").and_then(|v| v.as_str()).map(String::from),
+                state3: obj.get("State3").and_then(|v| v.as_str()).map(String::from),
+                state_flag: obj.get("StateFlag").and_then(|v| v.as_str()).map(String::from),
+                sub_driver_cd: obj.get("SubDriverCD").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                temp1: obj.get("Temp1").and_then(|v| v.as_str()).map(String::from),
+                temp2: obj.get("Temp2").and_then(|v| v.as_str()).map(String::from),
+                temp3: obj.get("Temp3").and_then(|v| v.as_str()).map(String::from),
+                temp4: obj.get("Temp4").and_then(|v| v.as_str()).map(String::from),
+                temp_state: obj.get("TempState").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                vehicle_cd: obj.get("VehicleCD").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                vehicle_icon_color: obj.get("VehicleIconColor").and_then(|v| v.as_str()).map(String::from),
+                vehicle_icon_label_for_datetime: obj.get("VehicleIconLabelForDatetime").and_then(|v| v.as_str()).map(String::from),
+                vehicle_icon_label_for_driver: obj.get("VehicleIconLabelForDriver").and_then(|v| v.as_str()).map(String::from),
+                vehicle_icon_label_for_vehicle: obj.get("VehicleIconLabelForVehicle").and_then(|v| v.as_str()).map(String::from),
+                vehicle_name: obj.get("VehicleName").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            })
+        })
+        .collect();
+
+    info!("Converted {} records to Dtakolog messages", dtakologs.len());
+
+    // Create request with organization ID header
+    let mut request = Request::new(BulkCreateDtakologsRequest { dtakologs });
+    if !config.rust_logi_organization_id.is_empty() {
+        request.metadata_mut().insert(
+            "x-organization-id",
+            MetadataValue::try_from(&config.rust_logi_organization_id)
+                .map_err(|e| format!("Invalid organization ID: {}", e))?,
+        );
+    }
+
+    // Send request
+    let response = client
+        .bulk_create(request)
+        .await
+        .map_err(|e| format!("BulkCreate failed: {}", e))?;
+
+    let resp = response.into_inner();
+    info!(
+        "rust-logi response: success={}, records_added={}, total_records={}, message={}",
+        resp.success, resp.records_added, resp.total_records, resp.message
+    );
+
+    Ok(HonoApiResponse {
+        success: resp.success,
+        records_added: resp.records_added,
+        total_records: resp.total_records,
+        message: resp.message,
+    })
+}
+
+/// Convert DataDateTime from "YY/MM/DD HH:MM" to ISO8601 format
+#[cfg(feature = "grpc")]
+fn convert_data_date_time(date_str: &str) -> String {
+    use chrono::offset::FixedOffset;
+
+    if date_str.is_empty() {
+        return "2020-01-01T00:00:00+09:00".to_string();
+    }
+    // Convert "24/11/28 10:37" to "2024-11-28T10:37:00+09:00"
+    let full_date = format!("20{}", date_str);
+    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(&full_date, "%Y/%m/%d %H:%M") {
+        let jst = FixedOffset::east_opt(9 * 3600).unwrap();
+        return dt.and_local_timezone(jst).unwrap().to_rfc3339();
+    }
+    // Fallback
+    format!("20{}", date_str)
+}
+
+/// Stub for non-grpc feature
+#[cfg(not(feature = "grpc"))]
+async fn send_to_rust_logi(
+    _config: &Config,
+    _raw_data: &[serde_json::Value],
+) -> Result<HonoApiResponse, String> {
+    warn!("grpc feature not enabled - data not sent to rust-logi");
+    Err("grpc feature not enabled".to_string())
 }
 
 /// Process an ETC scrape job in the background

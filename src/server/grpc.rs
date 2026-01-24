@@ -32,7 +32,6 @@ use browser_render::etc_scraper_service_server::{EtcScraperService, EtcScraperSe
 use browser_render::{
     CheckSessionRequest, CheckSessionResponse, ClearSessionRequest, ClearSessionResponse,
     GetVehicleDataRequest, GetVehicleDataResponse, HealthCheckRequest, HealthCheckResponse,
-    VehicleData,
     // ETC Scraper types
     EtcScrapeRequest as ProtoEtcScrapeRequest, EtcScrapeResponse,
     EtcBatchRequest as ProtoEtcBatchRequest, EtcBatchEnvRequest,
@@ -46,7 +45,9 @@ use browser_render::{
 
 /// gRPC server implementation
 pub struct GrpcServer {
+    #[allow(dead_code)]
     config: Arc<Config>,
+    #[allow(dead_code)]
     storage: Arc<Storage>,
     renderer: Arc<Renderer>,
     job_manager: Arc<JobManager>,
@@ -149,36 +150,20 @@ impl BrowserRenderService for GrpcServer {
             req.branch_id, req.filter_id
         );
 
-        match self
-            .renderer
-            .get_vehicle_data("", &req.branch_id, &req.filter_id, req.force_login)
-            .await
-        {
-            Ok((vehicles, session_id, _)) => {
-                let pb_vehicles: Vec<VehicleData> = vehicles
-                    .into_iter()
-                    .map(|v| VehicleData {
-                        vehicle_cd: v.vehicle_cd,
-                        vehicle_name: v.vehicle_name,
-                        status: v.status,
-                        metadata: v.metadata,
-                    })
-                    .collect();
+        // Create a vehicle job and return the job ID
+        // Client should use GetJob to check status and retrieve data
+        let job_id = self.job_manager.create_vehicle_job().await;
 
-                Ok(Response::new(GetVehicleDataResponse {
-                    status: "success".to_string(),
-                    status_code: 200,
-                    data: pb_vehicles,
-                    session_id,
-                }))
-            }
-            Err(e) => Ok(Response::new(GetVehicleDataResponse {
-                status: e.to_string(),
-                status_code: 500,
-                data: vec![],
-                session_id: String::new(),
-            })),
-        }
+        info!("Created vehicle job: {}", job_id);
+
+        // Return immediately with job_id in session_id field for backward compatibility
+        // The actual vehicle data will be available once the job completes
+        Ok(Response::new(GetVehicleDataResponse {
+            status: "pending".to_string(),
+            status_code: 202, // Accepted
+            data: vec![],
+            session_id: job_id, // Using session_id to return job_id for backward compatibility
+        }))
     }
 
     async fn check_session(
