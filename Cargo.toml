@@ -19,7 +19,7 @@ tower = "0.5"
 tower-http = { version = "0.5", features = ["cors"] }
 
 # gRPC (optional, requires protoc)
-tonic = { version = "0.12", optional = true, features = ["tls", "tls-roots"] }
+tonic = { version = "0.12", optional = true, features = ["tls", "tls-webpki-roots"] }
 tonic-reflection = { version = "0.12", optional = true }
 tonic-web = { version = "0.12", optional = true }
 prost = { version = "0.13", optional = true }
