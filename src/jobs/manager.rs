@@ -778,7 +778,7 @@ async fn send_to_rust_logi(
                 setting_temp1: obj.get("SettingTemp1").and_then(|v| v.as_str()).unwrap_or("").to_string(),
                 setting_temp3: obj.get("SettingTemp3").and_then(|v| v.as_str()).unwrap_or("").to_string(),
                 setting_temp4: obj.get("SettingTemp4").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                speed: obj.get("Speed").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                speed: obj.get("Speed").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32,
                 start_work_date_time: obj.get("StartWorkDateTime").and_then(|v| v.as_str()).map(String::from),
                 state: obj.get("State").and_then(|v| v.as_str()).map(String::from),
                 state1: obj.get("State1").and_then(|v| v.as_str()).map(String::from),

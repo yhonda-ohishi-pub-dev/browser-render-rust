@@ -70,7 +70,7 @@ message Dtakolog {
   string setting_temp1 = 35;
   string setting_temp3 = 36;
   string setting_temp4 = 37;
-  double speed = 38;
+  float speed = 38;
   optional string start_work_date_time = 39;
   optional string state = 40;
   optional string state1 = 41;
