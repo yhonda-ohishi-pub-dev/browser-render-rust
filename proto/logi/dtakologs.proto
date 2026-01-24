@@ -1,0 +1,140 @@
+syntax = "proto3";
+
+package logi.dtakologs;
+
+import "common.proto";
+
+// Dtakologs Service - 運行ログ管理
+service DtakologsService {
+  // 全運行ログ取得
+  rpc ListAll(logi.common.Empty) returns (ListDtakologsResponse);
+
+  // VehicleCD毎の最新運行ログ取得
+  rpc CurrentListAll(logi.common.Empty) returns (ListDtakologsResponse);
+
+  // ホーム車両の最新運行ログ取得 (AddressDispP="本社営業所")
+  rpc CurrentListAllHome(logi.common.Empty) returns (ListDtakologsResponse);
+
+  // 指定条件での最新運行ログ取得
+  rpc CurrentListSelect(CurrentListSelectRequest) returns (ListDtakologsResponse);
+
+  // 日付指定で運行ログ取得
+  rpc GetDate(GetDateRequest) returns (ListDtakologsResponse);
+
+  // 運行ログ作成
+  rpc Create(CreateDtakologRequest) returns (CreateDtakologResponse);
+
+  // 運行ログ一括作成 (browser-render-rust用)
+  rpc BulkCreate(BulkCreateDtakologsRequest) returns (BulkCreateDtakologsResponse);
+
+  // 全運行ログ削除
+  rpc DeleteAll(logi.common.Empty) returns (DeleteResponse);
+}
+
+// 運行ログデータ
+message Dtakolog {
+  string type = 1;  // __type
+  optional string address_disp_c = 2;
+  optional string address_disp_p = 3;
+  optional string all_state = 4;
+  optional string all_state_ex = 5;
+  optional string all_state_font_color = 6;
+  int32 all_state_font_color_index = 7;
+  string all_state_ryout_color = 8;
+  int32 branch_cd = 9;
+  string branch_name = 10;
+  optional string comu_date_time = 11;
+  int32 current_work_cd = 12;
+  optional string current_work_name = 13;
+  string data_date_time = 14;  // 複合主キー (その1)
+  int32 data_filter_type = 15;
+  int32 disp_flag = 16;
+  int32 driver_cd = 17;
+  optional string driver_name = 18;
+  optional string event_val = 19;
+  int32 gps_direction = 20;
+  int32 gps_enable = 21;
+  optional string gps_lati_and_long = 22;
+  int32 gps_latitude = 23;
+  int32 gps_longitude = 24;
+  int32 gps_satellite_num = 25;
+  optional string odometer = 26;
+  int32 operation_state = 27;
+  int32 recive_event_type = 28;
+  int32 recive_packet_type = 29;
+  optional string recive_type_color_name = 30;
+  optional string recive_type_name = 31;
+  int32 recive_work_cd = 32;
+  int32 revo = 33;
+  string setting_temp = 34;
+  string setting_temp1 = 35;
+  string setting_temp3 = 36;
+  string setting_temp4 = 37;
+  double speed = 38;
+  optional string start_work_date_time = 39;
+  optional string state = 40;
+  optional string state1 = 41;
+  optional string state2 = 42;
+  optional string state3 = 43;
+  optional string state_flag = 44;
+  int32 sub_driver_cd = 45;
+  optional string temp1 = 46;
+  optional string temp2 = 47;
+  optional string temp3 = 48;
+  optional string temp4 = 49;
+  int32 temp_state = 50;
+  int32 vehicle_cd = 51;  // 複合主キー (その2)
+  optional string vehicle_icon_color = 52;
+  optional string vehicle_icon_label_for_datetime = 53;
+  optional string vehicle_icon_label_for_driver = 54;
+  optional string vehicle_icon_label_for_vehicle = 55;
+  string vehicle_name = 56;
+}
+
+// 運行ログ一覧レスポンス
+message ListDtakologsResponse {
+  repeated Dtakolog dtakologs = 1;
+  optional logi.common.PaginationMeta pagination = 2;
+}
+
+// 指定条件での取得リクエスト
+message CurrentListSelectRequest {
+  optional string address_disp_p = 1;  // 住所フィルタ
+  optional int32 branch_cd = 2;        // 支店CDフィルタ
+  repeated int32 vehicle_cds = 3;      // 車両CDリスト
+}
+
+// 日付指定リクエスト
+message GetDateRequest {
+  string date_time = 1;  // YY/MM/DD HH:MM 形式
+  optional int32 vehicle_cd = 2;  // 車両CDフィルタ (任意)
+}
+
+// 作成リクエスト
+message CreateDtakologRequest {
+  Dtakolog dtakolog = 1;
+}
+
+// 作成レスポンス
+message CreateDtakologResponse {
+  Dtakolog dtakolog = 1;
+}
+
+// 削除レスポンス
+message DeleteResponse {
+  int32 deleted_count = 1;
+  string message = 2;
+}
+
+// 一括作成リクエスト (browser-render-rust用)
+message BulkCreateDtakologsRequest {
+  repeated Dtakolog dtakologs = 1;
+}
+
+// 一括作成レスポンス
+message BulkCreateDtakologsResponse {
+  bool success = 1;
+  int32 records_added = 2;
+  int32 total_records = 3;
+  string message = 4;
+}

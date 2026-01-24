@@ -38,6 +38,8 @@ pub enum RendererError {
     HttpRequest(String),
     #[error("JSON serialization error: {0}")]
     JsonError(String),
+    #[error("gRPC error: {0}")]
+    GrpcError(String),
 }
 
 impl RendererError {
@@ -82,6 +84,9 @@ impl RendererError {
 
             // API errors - use the original status code if available
             Self::ApiError { status_code, .. } => *status_code,
+
+            // gRPC errors are mapped to 502 (Bad Gateway - upstream error)
+            Self::GrpcError(_) => 502,
         }
     }
 
@@ -290,13 +295,20 @@ impl Renderer {
             }
         }
 
-        // Send to Hono API
-        let hono_response = match self.send_raw_to_hono_api(&raw_data).await {
+        // Send to rust-logi via gRPC (requires grpc feature)
+        #[cfg(feature = "grpc")]
+        let hono_response = match self.send_to_rust_logi(&raw_data).await {
             Ok(resp) => Some(resp),
             Err(e) => {
-                warn!("Failed to send to Hono API: {}", e);
+                warn!("Failed to send to rust-logi: {}", e);
                 None
             }
+        };
+
+        #[cfg(not(feature = "grpc"))]
+        let hono_response: Option<HonoApiResponse> = {
+            warn!("grpc feature not enabled - data not sent to rust-logi");
+            None
         };
 
         // Close page (best effort, don't fail the operation if close fails)
@@ -726,46 +738,151 @@ impl Renderer {
         }
     }
 
-    /// Send raw data to Hono API
-    async fn send_raw_to_hono_api(
+    /// Send raw data to rust-logi via gRPC
+    #[cfg(feature = "grpc")]
+    async fn send_to_rust_logi(
         &self,
         raw_data: &[serde_json::Value],
     ) -> Result<HonoApiResponse> {
-        info!("sendRawToHonoAPI: Sending {} records", raw_data.len());
+        use crate::logi::dtakologs::dtakologs_service_client::DtakologsServiceClient;
+        use crate::logi::dtakologs::{BulkCreateDtakologsRequest, Dtakolog};
+        use tonic::metadata::MetadataValue;
+        use tonic::Request;
 
-        let json_data =
-            serde_json::to_string(raw_data).map_err(|e| RendererError::JsonError(e.to_string()))?;
-
-        info!("sendRawToHonoAPI: JSON size: {} bytes", json_data.len());
-
-        let response = self
-            .http_client
-            .post(&self.config.hono_api_url)
-            .header("Content-Type", "application/json; charset=utf-8")
-            .body(json_data)
-            .send()
-            .await
-            .map_err(|e| RendererError::HttpRequest(e.to_string()))?;
-
-        let status = response.status();
-        let body = response
-            .text()
-            .await
-            .map_err(|e| RendererError::HttpRequest(e.to_string()))?;
-
-        if !status.is_success() {
-            error!("API Error - Status: {}, Body: {}", status, body);
-            return Err(RendererError::api(status.as_u16(), body));
+        // Check if rust-logi URL is configured
+        if self.config.rust_logi_url.is_empty() {
+            return Err(RendererError::GrpcError(
+                "RUST_LOGI_URL not configured".to_string(),
+            ));
         }
 
-        info!("API Success - Status: {}, Body: {}", status, body);
+        info!(
+            "send_to_rust_logi: Sending {} records to {}",
+            raw_data.len(),
+            self.config.rust_logi_url
+        );
+
+        // Create gRPC client
+        let channel = tonic::transport::Channel::from_shared(self.config.rust_logi_url.clone())
+            .map_err(|e| RendererError::GrpcError(format!("Invalid URL: {}", e)))?
+            .connect()
+            .await
+            .map_err(|e| RendererError::GrpcError(format!("Connection failed: {}", e)))?;
+
+        let mut client = DtakologsServiceClient::new(channel);
+
+        // Convert raw data to Dtakolog messages
+        let dtakologs: Vec<Dtakolog> = raw_data
+            .iter()
+            .filter_map(|v| {
+                // Parse JSON to Dtakolog
+                let obj = v.as_object()?;
+                Some(Dtakolog {
+                    r#type: obj.get("__type")?.as_str()?.to_string(),
+                    address_disp_c: obj.get("AddressDispC").and_then(|v| v.as_str()).map(String::from),
+                    address_disp_p: obj.get("AddressDispP").and_then(|v| v.as_str()).map(String::from),
+                    all_state: obj.get("AllState").and_then(|v| v.as_str()).map(String::from),
+                    all_state_ex: obj.get("AllStateEx").and_then(|v| v.as_str()).map(String::from),
+                    all_state_font_color: obj.get("AllStateFontColor").and_then(|v| v.as_str()).map(String::from),
+                    all_state_font_color_index: obj.get("AllStateFontColorIndex").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                    all_state_ryout_color: obj.get("AllStateRyoutColor").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                    branch_cd: obj.get("BranchCD").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                    branch_name: obj.get("BranchName").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                    comu_date_time: obj.get("ComuDateTime").and_then(|v| v.as_str()).map(String::from),
+                    current_work_cd: obj.get("CurrentWorkCD").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                    current_work_name: obj.get("CurrentWorkName").and_then(|v| v.as_str()).map(String::from),
+                    data_date_time: self.convert_data_date_time(obj.get("DataDateTime").and_then(|v| v.as_str()).unwrap_or("")),
+                    data_filter_type: obj.get("DataFilterType").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                    disp_flag: obj.get("DispFlag").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                    driver_cd: obj.get("DriverCD").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                    driver_name: obj.get("DriverName").and_then(|v| v.as_str()).map(String::from),
+                    event_val: obj.get("EventVal").and_then(|v| v.as_str()).map(String::from),
+                    gps_direction: obj.get("GPSDirection").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                    gps_enable: obj.get("GPSEnable").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                    gps_lati_and_long: obj.get("GPSLatiAndLong").and_then(|v| v.as_str()).map(String::from),
+                    gps_latitude: obj.get("GPSLatitude").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                    gps_longitude: obj.get("GPSLongitude").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                    gps_satellite_num: obj.get("GPSSatelliteNum").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                    odometer: obj.get("ODOMeter").and_then(|v| v.as_str()).map(String::from),
+                    operation_state: obj.get("OperationState").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                    recive_event_type: obj.get("ReciveEventType").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                    recive_packet_type: obj.get("RecivePacketType").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                    recive_type_color_name: obj.get("ReciveTypeColorName").and_then(|v| v.as_str()).map(String::from),
+                    recive_type_name: obj.get("ReciveTypeName").and_then(|v| v.as_str()).map(String::from),
+                    recive_work_cd: obj.get("ReciveWorkCD").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                    revo: obj.get("Revo").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                    setting_temp: obj.get("SettingTemp").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                    setting_temp1: obj.get("SettingTemp1").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                    setting_temp3: obj.get("SettingTemp3").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                    setting_temp4: obj.get("SettingTemp4").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                    speed: obj.get("Speed").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                    start_work_date_time: obj.get("StartWorkDateTime").and_then(|v| v.as_str()).map(String::from),
+                    state: obj.get("State").and_then(|v| v.as_str()).map(String::from),
+                    state1: obj.get("State1").and_then(|v| v.as_str()).map(String::from),
+                    state2: obj.get("State2").and_then(|v| v.as_str()).map(String::from),
+                    state3: obj.get("State3").and_then(|v| v.as_str()).map(String::from),
+                    state_flag: obj.get("StateFlag").and_then(|v| v.as_str()).map(String::from),
+                    sub_driver_cd: obj.get("SubDriverCD").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                    temp1: obj.get("Temp1").and_then(|v| v.as_str()).map(String::from),
+                    temp2: obj.get("Temp2").and_then(|v| v.as_str()).map(String::from),
+                    temp3: obj.get("Temp3").and_then(|v| v.as_str()).map(String::from),
+                    temp4: obj.get("Temp4").and_then(|v| v.as_str()).map(String::from),
+                    temp_state: obj.get("TempState").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                    vehicle_cd: obj.get("VehicleCD").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                    vehicle_icon_color: obj.get("VehicleIconColor").and_then(|v| v.as_str()).map(String::from),
+                    vehicle_icon_label_for_datetime: obj.get("VehicleIconLabelForDatetime").and_then(|v| v.as_str()).map(String::from),
+                    vehicle_icon_label_for_driver: obj.get("VehicleIconLabelForDriver").and_then(|v| v.as_str()).map(String::from),
+                    vehicle_icon_label_for_vehicle: obj.get("VehicleIconLabelForVehicle").and_then(|v| v.as_str()).map(String::from),
+                    vehicle_name: obj.get("VehicleName").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                })
+            })
+            .collect();
+
+        info!("Converted {} records to Dtakolog messages", dtakologs.len());
+
+        // Create request with organization ID header
+        let mut request = Request::new(BulkCreateDtakologsRequest { dtakologs });
+        if !self.config.rust_logi_organization_id.is_empty() {
+            request.metadata_mut().insert(
+                "x-organization-id",
+                MetadataValue::try_from(&self.config.rust_logi_organization_id)
+                    .map_err(|e| RendererError::GrpcError(format!("Invalid organization ID: {}", e)))?,
+            );
+        }
+
+        // Send request
+        let response = client
+            .bulk_create(request)
+            .await
+            .map_err(|e| RendererError::GrpcError(format!("BulkCreate failed: {}", e)))?;
+
+        let resp = response.into_inner();
+        info!(
+            "rust-logi response: success={}, records_added={}, total_records={}, message={}",
+            resp.success, resp.records_added, resp.total_records, resp.message
+        );
 
         Ok(HonoApiResponse {
-            success: true,
-            records_added: raw_data.len() as i32,
-            total_records: raw_data.len() as i32,
-            message: format!("Successfully sent {} records to Hono API", raw_data.len()),
+            success: resp.success,
+            records_added: resp.records_added,
+            total_records: resp.total_records,
+            message: resp.message,
         })
+    }
+
+    /// Convert DataDateTime from "YY/MM/DD HH:MM" to ISO8601 format
+    fn convert_data_date_time(&self, date_str: &str) -> String {
+        if date_str.is_empty() {
+            return "2020-01-01T00:00:00+09:00".to_string();
+        }
+        // Convert "24/11/28 10:37" to "2024-11-28T10:37:00+09:00"
+        let full_date = format!("20{}", date_str);
+        if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(&full_date, "%Y/%m/%d %H:%M") {
+            let jst = FixedOffset::east_opt(9 * 3600).unwrap();
+            return dt.and_local_timezone(jst).unwrap().to_rfc3339();
+        }
+        // Fallback
+        format!("20{}", date_str)
     }
 
     /// Check if a session is valid

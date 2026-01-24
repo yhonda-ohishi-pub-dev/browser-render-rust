@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package logi.common;
+
+// Empty message for requests/responses with no data
+message Empty {}
+
+// Pagination request
+message PaginationRequest {
+  int32 page = 1;
+  int32 per_page = 2;
+}
+
+// Pagination response metadata
+message PaginationMeta {
+  int32 total = 1;
+  int32 page = 2;
+  int32 per_page = 3;
+  int32 total_pages = 4;
+}
+
+// Generic error response
+message ErrorResponse {
+  string message = 1;
+  string code = 2;
+  optional string stack_trace = 3;
+}
+
+// Timestamp wrapper
+message Timestamp {
+  string iso8601 = 1;  // ISO 8601 formatted timestamp
+}

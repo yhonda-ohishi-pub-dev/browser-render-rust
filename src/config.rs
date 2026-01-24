@@ -64,8 +64,9 @@ pub struct Config {
     pub session_ttl: Duration,
     pub cookie_ttl: Duration,
 
-    // API settings
-    pub hono_api_url: String,
+    // rust-logi API settings
+    pub rust_logi_url: String,
+    pub rust_logi_organization_id: String,
 
     // Logging settings
     pub log_format: LogFormat,
@@ -92,7 +93,8 @@ impl Config {
             sqlite_path: get_env("SQLITE_PATH", "./data/browser_render.db"),
             session_ttl: get_env_duration("SESSION_TTL", Duration::from_secs(600)), // 10 minutes
             cookie_ttl: get_env_duration("COOKIE_TTL", Duration::from_secs(86400)), // 24 hours
-            hono_api_url: get_env("HONO_API_URL", "https://hono-api.mtamaramu.com/api/dtakologs"),
+            rust_logi_url: get_env("RUST_LOGI_URL", ""),
+            rust_logi_organization_id: get_env("RUST_LOGI_ORGANIZATION_ID", ""),
             log_format: LogFormat::from_str(&get_env("LOG_FORMAT", "text")),
             log_file: env::var("LOG_FILE").ok(),
             log_dir: get_env("LOG_DIR", "./logs"),
@@ -102,6 +104,14 @@ impl Config {
         // Validate required fields
         if cfg.user_name.is_empty() || cfg.comp_id.is_empty() || cfg.user_pass.is_empty() {
             warn!("Authentication credentials not set in environment variables");
+        }
+
+        // Validate rust-logi settings
+        if cfg.rust_logi_url.is_empty() {
+            warn!("RUST_LOGI_URL not set - data will not be sent to rust-logi");
+        }
+        if cfg.rust_logi_organization_id.is_empty() {
+            warn!("RUST_LOGI_ORGANIZATION_ID not set - required for rust-logi");
         }
 
         cfg
