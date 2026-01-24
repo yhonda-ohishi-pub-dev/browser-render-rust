@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc, offset::FixedOffset};
 use serde::{Deserialize, Serialize};
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, Semaphore};
 use tokio::time::{sleep, Duration};
 use tracing::{error, info, warn};
 use uuid::Uuid;
@@ -222,6 +222,8 @@ pub struct JobManager {
     queue: Arc<RwLock<VecDeque<QueuedJob>>>,
     config: Arc<Config>,
     running_count: Arc<RwLock<usize>>,
+    /// Semaphore to ensure only one vehicle job runs at a time
+    vehicle_semaphore: Arc<Semaphore>,
 }
 
 impl JobManager {
@@ -232,6 +234,8 @@ impl JobManager {
             queue: Arc::new(RwLock::new(VecDeque::new())),
             config,
             running_count: Arc::new(RwLock::new(0)),
+            // Only allow 1 vehicle job at a time to prevent session conflicts
+            vehicle_semaphore: Arc::new(Semaphore::new(1)),
         }
     }
 
@@ -280,14 +284,19 @@ impl JobManager {
             jobs.insert(job_id.clone(), job);
         }
 
-        // Start processing in background
+        // Start processing in background with semaphore to ensure serial execution
         let jobs = self.jobs.clone();
         let config = self.config.clone();
         let running_count = self.running_count.clone();
         let job_id_clone = job_id.clone();
+        let semaphore = self.vehicle_semaphore.clone();
 
         tokio::spawn(async move {
+            // Acquire semaphore permit - only one vehicle job can run at a time
+            let _permit = semaphore.acquire().await.expect("Semaphore closed");
+            info!("Vehicle job {} acquired semaphore, starting execution", job_id_clone);
             process_vehicle_job(jobs, config, running_count, job_id_clone).await;
+            // Permit is automatically released when _permit is dropped
         });
 
         job_id
