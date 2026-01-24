@@ -681,10 +681,10 @@ async fn send_to_rust_logi(
 
     // Create gRPC client with TLS for HTTPS URLs
     let channel = if config.rust_logi_url.starts_with("https://") {
-        info!("Connecting with TLS to {}", config.rust_logi_url);
+        info!("Connecting with TLS (webpki-roots) to {}", config.rust_logi_url);
         tonic::transport::Channel::from_shared(config.rust_logi_url.clone())
             .map_err(|e| format!("Invalid URL: {}", e))?
-            .tls_config(tonic::transport::ClientTlsConfig::new())
+            .tls_config(tonic::transport::ClientTlsConfig::new().with_webpki_roots())
             .map_err(|e| format!("TLS config failed: {}", e))?
             .connect()
             .await
