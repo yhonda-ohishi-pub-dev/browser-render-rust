@@ -679,12 +679,22 @@ async fn send_to_rust_logi(
         config.rust_logi_url
     );
 
-    // Create gRPC client
-    let channel = tonic::transport::Channel::from_shared(config.rust_logi_url.clone())
-        .map_err(|e| format!("Invalid URL: {}", e))?
-        .connect()
-        .await
-        .map_err(|e| format!("Connection failed: {}", e))?;
+    // Create gRPC client with TLS for HTTPS URLs
+    let channel = if config.rust_logi_url.starts_with("https://") {
+        tonic::transport::Channel::from_shared(config.rust_logi_url.clone())
+            .map_err(|e| format!("Invalid URL: {}", e))?
+            .tls_config(tonic::transport::ClientTlsConfig::new())
+            .map_err(|e| format!("TLS config failed: {}", e))?
+            .connect()
+            .await
+            .map_err(|e| format!("Connection failed: {}", e))?
+    } else {
+        tonic::transport::Channel::from_shared(config.rust_logi_url.clone())
+            .map_err(|e| format!("Invalid URL: {}", e))?
+            .connect()
+            .await
+            .map_err(|e| format!("Connection failed: {}", e))?
+    };
 
     let mut client = DtakologsServiceClient::new(channel);
 
