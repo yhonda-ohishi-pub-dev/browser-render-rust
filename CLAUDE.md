@@ -227,3 +227,26 @@ VenusBridgeService.Monitoring_DvrNotification2(sort, callback);  // 引数2つ
 cargo run -p scraper-service --example dvr_test
 ```
 - [rust-scraper/examples/dvr_test.rs](rust-scraper/examples/dvr_test.rs)
+
+### 本番確認済み (2026-01-25 14:27 JST)
+```
+DVR API call status: initiated
+DVR result received after 500ms
+```
+GCEデプロイ後、`/v1/vehicle/data`リクエストで動画通知機能が正常動作することを確認。
+
+---
+
+## 引き継ぎサマリー (2026-01-25)
+
+### 完了した作業
+1. **Monitoring_DvrNotification2の修正** - sort引数追加で解決
+2. **dvr_test.rs作成** - 素早いテスト用exampleファイル
+3. **GCEデプロイ・動作確認完了**
+
+### 現在の状態
+- 動画通知機能: **正常動作**
+- 全ての主要機能が稼働中
+
+### 残タスク
+- [ ] メトリクス追加（TODO参照）
