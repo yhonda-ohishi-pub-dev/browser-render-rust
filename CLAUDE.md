@@ -191,3 +191,39 @@ gcloud compute ssh instance-20251207-115015 --zone=asia-northeast1-b --command="
 - [x] ETC明細スクレイパー統合
 - [x] ETC複数アカウントバッチ処理
 - [ ] メトリクス追加
+- [x] 動画通知機能（Monitoring_DvrNotification2）の修正
+
+---
+
+## 動画通知機能 - 解決済み (2026-01-25)
+
+### 問題の原因
+`Monitoring_DvrNotification2` の呼び出し引数が間違っていた。
+
+**間違い:**
+```javascript
+VenusBridgeService.Monitoring_DvrNotification2(callback);  // 引数1つ
+```
+
+**正しい形式:**
+```javascript
+// sort引数形式: "fieldName,dir,pageIndex,pageSize"
+const sort = ",," + "0" + "," + "100";
+VenusBridgeService.Monitoring_DvrNotification2(sort, callback);  // 引数2つ
+```
+
+### 修正内容
+- [rust-scraper/src/dtakolog/scraper.rs](rust-scraper/src/dtakolog/scraper.rs) L913-917
+- sort引数を追加: `const sort = ",," + "0" + "," + "100";`
+
+### テスト結果
+- 修正前: 60秒タイムアウト、コールバック発火せず
+- 修正後: 500msで結果受信、正常動作
+
+### テスト用コード
+小さなテストコードを作成済み:
+```bash
+# 素早いテスト実行
+cargo run -p scraper-service --example dvr_test
+```
+- [rust-scraper/examples/dvr_test.rs](rust-scraper/examples/dvr_test.rs)
