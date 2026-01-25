@@ -50,8 +50,8 @@ struct Args {
     db_path: Option<String>,
 
     /// Run browser in headless mode
-    #[arg(long, default_value = "true")]
-    headless: bool,
+    #[arg(long)]
+    headless: Option<bool>,
 
     /// Enable debug mode
     #[arg(long, default_value = "false")]
@@ -96,7 +96,9 @@ async fn main() -> anyhow::Result<()> {
     if let Some(ref path) = args.db_path {
         cfg.sqlite_path = path.clone();
     }
-    cfg.browser_headless = args.headless;
+    if let Some(headless) = args.headless {
+        cfg.browser_headless = headless;
+    }
     cfg.browser_debug = args.debug;
 
     // Apply logging-specific overrides from CLI
