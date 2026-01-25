@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package logi.dvr_notifications;
+
+import "common.proto";
+
+service DvrNotificationsService {
+  // DVR通知一括作成
+  rpc BulkCreate(BulkCreateDvrNotificationsRequest) returns (BulkCreateDvrNotificationsResponse);
+}
+
+message DvrNotification {
+  int64 vehicle_cd = 1;
+  string vehicle_name = 2;
+  string serial_no = 3;
+  string file_name = 4;
+  string event_type = 5;
+  string dvr_datetime = 6;
+  string driver_name = 7;
+  string mp4_url = 8;  // 主キー（重複チェック用）
+}
+
+message BulkCreateDvrNotificationsRequest {
+  repeated DvrNotification notifications = 1;
+}
+
+message BulkCreateDvrNotificationsResponse {
+  bool success = 1;
+  int32 records_added = 2;   // 新規追加数
+  int32 total_records = 3;   // 受信総数
+  string message = 4;
+}

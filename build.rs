@@ -16,7 +16,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .build_client(true)
             .file_descriptor_set_path(out_dir.join("logi_descriptor.bin"))
             .compile_protos(
-                &["proto/logi/dtakologs.proto", "proto/logi/common.proto"],
+                &[
+                    "proto/logi/dtakologs.proto",
+                    "proto/logi/dvr_notifications.proto",
+                    "proto/logi/common.proto",
+                ],
                 &["proto/logi"],
             )?;
     }

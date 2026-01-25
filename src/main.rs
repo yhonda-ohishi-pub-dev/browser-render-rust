@@ -14,6 +14,9 @@ mod logi {
     pub mod dtakologs {
         tonic::include_proto!("logi.dtakologs");
     }
+    pub mod dvr_notifications {
+        tonic::include_proto!("logi.dvr_notifications");
+    }
 }
 
 use std::sync::Arc;

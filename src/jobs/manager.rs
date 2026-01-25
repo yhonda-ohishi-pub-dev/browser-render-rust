@@ -604,6 +604,18 @@ async fn process_vehicle_job(
         _ => None,
     };
 
+    // Send DVR notifications to rust-logi if any
+    if let Ok(ref scrape_result) = result {
+        if !scrape_result.video_notifications.is_empty() && !config.rust_logi_url.is_empty() {
+            if let Err(e) =
+                send_dvr_notifications_to_rust_logi(&config, &scrape_result.video_notifications)
+                    .await
+            {
+                warn!("Failed to send DVR notifications to rust-logi: {}", e);
+            }
+        }
+    }
+
     // Update job with results
     {
         let mut jobs_write = jobs.write().await;
@@ -879,6 +891,128 @@ async fn send_to_rust_logi(
     _raw_data: &[serde_json::Value],
 ) -> Result<HonoApiResponse, String> {
     warn!("grpc feature not enabled - data not sent to rust-logi");
+    Err("grpc feature not enabled".to_string())
+}
+
+/// Send DVR video notifications to rust-logi via gRPC
+#[cfg(feature = "grpc")]
+async fn send_dvr_notifications_to_rust_logi(
+    config: &Config,
+    notifications: &[scraper_service::VideoNotificationResult],
+) -> Result<(), String> {
+    use crate::logi::dvr_notifications::dvr_notifications_service_client::DvrNotificationsServiceClient;
+    use crate::logi::dvr_notifications::{BulkCreateDvrNotificationsRequest, DvrNotification};
+    use tonic::metadata::MetadataValue;
+    use tonic::Request;
+
+    if config.rust_logi_url.is_empty() {
+        return Err("RUST_LOGI_URL not configured".to_string());
+    }
+
+    if notifications.is_empty() {
+        info!("No DVR notifications to send");
+        return Ok(());
+    }
+
+    info!(
+        "send_dvr_notifications: Sending {} notifications to {}",
+        notifications.len(),
+        config.rust_logi_url
+    );
+
+    // Get ID token for Cloud Run authentication (only for HTTPS URLs)
+    let id_token = if config.rust_logi_url.starts_with("https://") {
+        match get_gce_id_token(&config.rust_logi_url).await {
+            Ok(token) => Some(token),
+            Err(e) => {
+                warn!("Failed to get ID token (not running on GCE?): {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    // Create gRPC client with TLS for HTTPS URLs
+    let channel = if config.rust_logi_url.starts_with("https://") {
+        tonic::transport::Channel::from_shared(config.rust_logi_url.clone())
+            .map_err(|e| format!("Invalid URL: {}", e))?
+            .tls_config(tonic::transport::ClientTlsConfig::new().with_webpki_roots())
+            .map_err(|e| format!("TLS config failed: {}", e))?
+            .connect()
+            .await
+            .map_err(|e| format!("Connection failed: {:?}", e))?
+    } else {
+        tonic::transport::Channel::from_shared(config.rust_logi_url.clone())
+            .map_err(|e| format!("Invalid URL: {}", e))?
+            .connect()
+            .await
+            .map_err(|e| format!("Connection failed: {:?}", e))?
+    };
+
+    let mut client = DvrNotificationsServiceClient::new(channel);
+
+    // Convert to proto messages
+    let dvr_notifications: Vec<DvrNotification> = notifications
+        .iter()
+        .map(|n| DvrNotification {
+            vehicle_cd: n.vehicle_cd,
+            vehicle_name: n.vehicle_name.clone(),
+            serial_no: n.serial_no.clone(),
+            file_name: n.file_name.clone(),
+            event_type: n.event_type.clone(),
+            dvr_datetime: n.dvr_datetime.clone(),
+            driver_name: n.driver_name.clone(),
+            mp4_url: n.mp4_url.clone(),
+        })
+        .collect();
+
+    // Create request with headers
+    let mut request = Request::new(BulkCreateDvrNotificationsRequest {
+        notifications: dvr_notifications,
+    });
+
+    // Add ID token for Cloud Run authentication
+    if let Some(ref token) = id_token {
+        let auth_value = format!("Bearer {}", token);
+        request.metadata_mut().insert(
+            "authorization",
+            MetadataValue::try_from(&auth_value)
+                .map_err(|e| format!("Invalid authorization header: {}", e))?,
+        );
+    }
+
+    // Add organization ID header
+    if !config.rust_logi_organization_id.is_empty() {
+        request.metadata_mut().insert(
+            "x-organization-id",
+            MetadataValue::try_from(&config.rust_logi_organization_id)
+                .map_err(|e| format!("Invalid organization ID: {}", e))?,
+        );
+    }
+
+    // Send request
+    let response = client
+        .bulk_create(request)
+        .await
+        .map_err(|e| format!("DVR BulkCreate failed: {}", e))?;
+
+    let resp = response.into_inner();
+    info!(
+        "DVR notifications sent: success={}, records_added={}, total_records={}, message={}",
+        resp.success, resp.records_added, resp.total_records, resp.message
+    );
+
+    Ok(())
+}
+
+/// Stub for non-grpc feature
+#[cfg(not(feature = "grpc"))]
+async fn send_dvr_notifications_to_rust_logi(
+    _config: &Config,
+    _notifications: &[scraper_service::VideoNotificationResult],
+) -> Result<(), String> {
+    warn!("grpc feature not enabled - DVR notifications not sent");
     Err("grpc feature not enabled".to_string())
 }
 
