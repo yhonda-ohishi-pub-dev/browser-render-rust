@@ -1,6 +1,10 @@
 # Stage 1: Build Rust binary
 FROM rust:1.85-slim-bookworm AS builder
 
+# Limit parallel compilation jobs (default: 2)
+ARG CARGO_BUILD_JOBS=2
+ENV CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS}
+
 RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
@@ -24,13 +28,13 @@ COPY proto ./proto
 COPY build.rs ./
 
 # Build dependencies (cached layer)
-RUN cargo build --release --features grpc && rm -rf src
+RUN cargo build --release --features grpc -j ${CARGO_BUILD_JOBS} && rm -rf src
 
 # Copy actual source code
 COPY src ./src
 
 # Touch main.rs to invalidate cache for source files only
-RUN touch src/main.rs && cargo build --release --features grpc
+RUN touch src/main.rs && cargo build --release --features grpc -j ${CARGO_BUILD_JOBS}
 
 # Stage 2: Runtime with headless-shell
 FROM chromedp/headless-shell:stable AS headless

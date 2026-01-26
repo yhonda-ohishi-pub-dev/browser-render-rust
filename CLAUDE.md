@@ -92,10 +92,12 @@ cargo test --test browser_integration_test test_mock_server_standalone -- --noca
 | `ETC_DOWNLOAD_PATH` | ダウンロード先パス | `/data/downloads` |
 
 ```bash
-# .envファイル例
-ETC_ACCOUNTS='[{"user_id":"user1","password":"pass1"},{"user_id":"user2","password":"pass2"}]'
+# .envファイル例（注意: シングルクォートは使わない）
+ETC_ACCOUNTS=[{"user_id":"user1","password":"pass1"},{"user_id":"user2","password":"pass2"}]
 ETC_DOWNLOAD_PATH=/data/etc-downloads
 ```
+
+> **重要**: `ETC_ACCOUNTS`にシングルクォートを使うと、Dockerがクォートを値の一部として解釈し、JSONパースエラーになる。
 
 ### 環境変数バッチエンドポイント
 リクエストボディはオプション（download_path/headlessの上書き用）：
@@ -157,25 +159,26 @@ gcloud compute ssh instance-20251207-115015 --zone=asia-northeast1-b --command="
 
 ### Cron設定（GCE上）
 
-Vehicleデータ取得（10分おき）:
+両方とも失敗時にメール通知するスクリプトを使用。
+
+**Vehicleデータ取得（10分おき）:**
 ```bash
 # /etc/cron.d/vehicle-fetch
-*/10 * * * * root curl -sf http://localhost:8080/v1/vehicle/data >> /opt/browser-render/logs/vehicle-cron.log 2>&1
+*/10 * * * * root /opt/browser-render/scripts/vehicle-fetch.sh
 ```
+- スクリプト: [scripts/vehicle-fetch.sh](scripts/vehicle-fetch.sh)（GCE上にコピー済み）
+- ログ: `/opt/browser-render/logs/vehicle-cron.log`
+- 失敗時: メール通知
 
-ETC明細スクレイプ（任意の時間に設定可能）:
+**ETC明細バッチスクレイプ（UTC 21,22,23,0時 = JST 6,7,8,9時）:**
 ```bash
-# /etc/cron.d/etc-scrape
-# 毎日6時にキューに追加（idle時に自動実行）
-0 6 * * * root curl -sf -X POST -H "Content-Type: application/json" \
-  -d '{"user_id":"xxx","password":"xxx"}' \
-  http://localhost:8080/v1/etc/scrape/queue >> /opt/browser-render/logs/etc-cron.log 2>&1
-
-# 即時実行したい場合
-# 0 6 * * * root curl -sf -X POST -H "Content-Type: application/json" \
-#   -d '{"user_id":"xxx","password":"xxx"}' \
-#   http://localhost:8080/v1/etc/scrape >> /opt/browser-render/logs/etc-cron.log 2>&1
+# /etc/cron.d/etc-scrape-batch-env
+0 21,22,23,0 * * * root /opt/browser-render/scripts/etc-scrape-batch.sh
 ```
+- スクリプト: [scripts/etc-scrape-batch.sh](scripts/etc-scrape-batch.sh)（GCE上にコピー済み）
+- ログ: `/opt/browser-render/logs/etc-cron.log`
+- 失敗時: メール通知
+- 環境変数`ETC_ACCOUNTS`からアカウント情報を取得
 
 ### ヘルスチェック
 ```bash
@@ -190,8 +193,9 @@ gcloud compute ssh instance-20251207-115015 --zone=asia-northeast1-b --command="
 - [x] Docker + GCE自動デプロイ
 - [x] ETC明細スクレイパー統合
 - [x] ETC複数アカウントバッチ処理
-- [ ] メトリクス追加
 - [x] 動画通知機能（Monitoring_DvrNotification2）の修正
+- [x] ETC batch scrape cron失敗通知
+- [ ] メトリクス追加
 
 ---
 
@@ -237,15 +241,18 @@ GCEデプロイ後、`/v1/vehicle/data`リクエストで動画通知機能が�
 
 ---
 
-## 引き継ぎサマリー (2026-01-25)
+## 引き継ぎサマリー (2026-01-26)
 
 ### 完了した作業
 1. **Monitoring_DvrNotification2の修正** - sort引数追加で解決
 2. **dvr_test.rs作成** - 素早いテスト用exampleファイル
 3. **GCEデプロイ・動作確認完了**
+4. **ETC batch scrape cron失敗通知** - `etc-scrape-batch.sh`スクリプト追加
+5. **`.env`のETC_ACCOUNTSシングルクォート問題修正**
 
 ### 現在の状態
 - 動画通知機能: **正常動作**
+- ETC batch scrape: **正常動作**（失敗時メール通知あり）
 - 全ての主要機能が稼働中
 
 ### 残タスク

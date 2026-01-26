@@ -13,9 +13,12 @@ echo "=== Browser Render Rust - Deploy Script ==="
 echo "Image: ${IMAGE}:${TAG}"
 echo ""
 
-# Build Docker image
+# Build Docker image (limit parallelism to prevent system overload)
 echo "=== Building Docker image ==="
-docker build -t ${IMAGE}:${TAG} -t ${IMAGE}:latest .
+docker build \
+    --build-arg CARGO_BUILD_JOBS=2 \
+    --cpuset-cpus="0-3" \
+    -t ${IMAGE}:${TAG} -t ${IMAGE}:latest .
 
 # Push to GHCR
 echo ""
