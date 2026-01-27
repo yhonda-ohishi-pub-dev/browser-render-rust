@@ -176,6 +176,13 @@ struct HealthResponse {
     status: String,
     version: String,
     uptime: f64,
+    env: EnvStatus,
+}
+
+#[derive(Serialize)]
+struct EnvStatus {
+    etc_accounts: bool,
+    etc_download_path: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -585,10 +592,17 @@ async fn handle_session_clear(
 async fn handle_health(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let uptime = state.start_time.elapsed().as_secs_f64();
 
+    let etc_accounts = std::env::var("ETC_ACCOUNTS").is_ok();
+    let etc_download_path = std::env::var("ETC_DOWNLOAD_PATH").ok();
+
     Json(HealthResponse {
         status: "healthy".to_string(),
         version: "1.0.0".to_string(),
         uptime,
+        env: EnvStatus {
+            etc_accounts,
+            etc_download_path,
+        },
     })
 }
 
