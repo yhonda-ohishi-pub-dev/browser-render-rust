@@ -60,7 +60,22 @@ cargo test --test browser_integration_test test_mock_server_standalone -- --noca
 | `/v1/job/:id` | GET | ジョブステータス確認 |
 | `/v1/jobs` | GET | 全ジョブ一覧 |
 | `/v1/jobs/queue` | GET | キュー状態確認 |
-| `/health` | GET | ヘルスチェック |
+| `/health` | GET | ヘルスチェック（環境変数設定状況も返す） |
+
+### Health Response
+```json
+{
+  "status": "healthy",
+  "version": "1.0.0",
+  "uptime": 118.78,
+  "env": {
+    "etc_accounts": true,
+    "etc_download_path": "./downloads"
+  }
+}
+```
+- `etc_accounts`: `ETC_ACCOUNTS`が設定されているか（`true`/`false`）
+- `etc_download_path`: `ETC_DOWNLOAD_PATH`の値（未設定時は`null`）
 
 ### ETC Scrape Request Body（単一アカウント）
 ```json
