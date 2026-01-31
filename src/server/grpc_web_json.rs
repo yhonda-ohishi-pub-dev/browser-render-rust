@@ -859,31 +859,39 @@ fn job_proto_to_json(job: browser_render::Job) -> JobJson {
 // Request types
 #[derive(Deserialize)]
 struct GetVehicleDataJson {
+    #[serde(alias = "branchId")]
     branch_id: Option<String>,
+    #[serde(alias = "filterId")]
     filter_id: Option<String>,
+    #[serde(alias = "forceLogin")]
     force_login: Option<bool>,
 }
 
 #[derive(Deserialize)]
 struct CheckSessionJson {
+    #[serde(alias = "sessionId")]
     session_id: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct ClearSessionJson {
+    #[serde(alias = "sessionId")]
     session_id: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct EtcScrapeJson {
+    #[serde(alias = "userId")]
     user_id: Option<String>,
     password: Option<String>,
+    #[serde(alias = "downloadPath")]
     download_path: Option<String>,
     headless: Option<bool>,
 }
 
 #[derive(Deserialize)]
 struct EtcAccountJson {
+    #[serde(alias = "userId")]
     user_id: Option<String>,
     password: Option<String>,
     name: Option<String>,
@@ -892,35 +900,42 @@ struct EtcAccountJson {
 #[derive(Deserialize)]
 struct EtcBatchJson {
     accounts: Option<Vec<EtcAccountJson>>,
+    #[serde(alias = "downloadPath")]
     download_path: Option<String>,
     headless: Option<bool>,
 }
 
 #[derive(Deserialize)]
 struct EtcBatchEnvJson {
+    #[serde(alias = "downloadPath")]
     download_path: Option<String>,
     headless: Option<bool>,
 }
 
 #[derive(Deserialize)]
 struct GetJobJson {
+    #[serde(alias = "jobId")]
     job_id: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct ListJobsJson {
+    #[serde(alias = "jobType")]
     job_type: Option<String>,
     status: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct ListSessionFilesJson {
+    #[serde(alias = "sessionId")]
     session_id: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct DownloadFileJson {
+    #[serde(alias = "sessionId")]
     session_id: Option<String>,
+    #[serde(alias = "fileName")]
     file_name: Option<String>,
 }
 
