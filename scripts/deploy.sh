@@ -64,6 +64,7 @@ docker run -d \
     -v /opt/browser-render/downloads:/app/downloads \
     --env-file /opt/browser-render/.env \
     --shm-size=2g \
+    --ulimit nofile=65536:65536 \
     --security-opt seccomp=unconfined \
     ${IMAGE}:${TAG}
 
