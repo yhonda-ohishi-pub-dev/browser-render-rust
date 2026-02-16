@@ -105,6 +105,7 @@ cargo test --test browser_integration_test test_mock_server_standalone -- --noca
 |----------|------|-----|
 | `ETC_ACCOUNTS` | アカウント情報（JSON配列） | `[{"user_id":"u1","password":"p1"}]` |
 | `ETC_DOWNLOAD_PATH` | ダウンロード先パス | `/data/downloads` |
+| `VEHICLE_JOB_TIMEOUT` | Vehicleジョブ全体タイムアウト（デフォルト: 240s） | `240s` |
 
 ```bash
 # .envファイル例（注意: シングルクォートは使わない）

@@ -57,6 +57,9 @@ pub struct Config {
     pub browser_timeout: Duration,
     pub browser_debug: bool,
 
+    // Job timeout settings
+    pub vehicle_job_timeout: Duration,
+
     // Database
     pub sqlite_path: String,
 
@@ -90,6 +93,7 @@ impl Config {
             browser_headless: get_env_bool("BROWSER_HEADLESS", true),
             browser_timeout: get_env_duration("BROWSER_TIMEOUT", Duration::from_secs(60)),
             browser_debug: get_env_bool("BROWSER_DEBUG", false),
+            vehicle_job_timeout: get_env_duration("VEHICLE_JOB_TIMEOUT", Duration::from_secs(240)),
             sqlite_path: get_env("SQLITE_PATH", "./data/browser_render.db"),
             session_ttl: get_env_duration("SESSION_TTL", Duration::from_secs(600)), // 10 minutes
             cookie_ttl: get_env_duration("COOKIE_TTL", Duration::from_secs(86400)), // 24 hours

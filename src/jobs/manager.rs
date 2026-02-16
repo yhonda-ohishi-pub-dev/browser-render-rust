@@ -290,12 +290,13 @@ impl JobManager {
         let running_count = self.running_count.clone();
         let job_id_clone = job_id.clone();
         let semaphore = self.vehicle_semaphore.clone();
+        let vehicle_job_timeout = self.config.vehicle_job_timeout;
 
         tokio::spawn(async move {
             // Acquire semaphore permit - only one vehicle job can run at a time
             let _permit = semaphore.acquire().await.expect("Semaphore closed");
             info!("Vehicle job {} acquired semaphore, starting execution", job_id_clone);
-            process_vehicle_job(jobs, config, running_count, job_id_clone).await;
+            process_vehicle_job(jobs, config, running_count, job_id_clone, vehicle_job_timeout).await;
             // Permit is automatically released when _permit is dropped
         });
 
@@ -547,6 +548,7 @@ async fn process_vehicle_job(
     config: Arc<Config>,
     running_count: Arc<RwLock<usize>>,
     job_id: String,
+    job_timeout: Duration,
 ) {
     use scraper_service::{DtakologConfig, DtakologScraper};
 
@@ -562,7 +564,11 @@ async fn process_vehicle_job(
         if let Some(job) = jobs_write.get_mut(&job_id) {
             job.status = JobStatus::Running;
             job.started_at = Some(Utc::now());
-            info!("Vehicle job {} status updated to running", job_id);
+            info!(
+                "Vehicle job {} status updated to running (timeout: {}s)",
+                job_id,
+                job_timeout.as_secs()
+            );
         }
     }
 
@@ -581,77 +587,108 @@ async fn process_vehicle_job(
         grpc_organization_id: None,
     };
 
-    // Create and initialize scraper
+    // Create scraper OUTSIDE timeout block so we can close it on timeout
     let mut scraper = DtakologScraper::new(dtakolog_config);
 
-    let result = async {
+    // Wrap core work in a timeout to prevent indefinite hangs
+    let timeout_result = tokio::time::timeout(job_timeout, async {
         scraper.initialize().await?;
         scraper.scrape(None, false).await
-    }
+    })
     .await;
 
-    // Send to gRPC if enabled and data was retrieved
-    let hono_response = match &result {
-        Ok(scrape_result) if !config.rust_logi_url.is_empty() => {
-            match send_to_rust_logi(&config, &scrape_result.raw_data).await {
-                Ok(resp) => Some(resp),
-                Err(e) => {
-                    warn!("Failed to send to rust-logi: {}", e);
-                    None
-                }
-            }
-        }
-        _ => None,
-    };
+    match timeout_result {
+        Ok(result) => {
+            // Normal completion (success or scraper error)
 
-    // Send DVR notifications to rust-logi if any
-    if let Ok(ref scrape_result) = result {
-        if !scrape_result.video_notifications.is_empty() && !config.rust_logi_url.is_empty() {
-            if let Err(e) =
-                send_dvr_notifications_to_rust_logi(&config, &scrape_result.video_notifications)
-                    .await
-            {
-                warn!("Failed to send DVR notifications to rust-logi: {}", e);
-            }
-        }
-    }
-
-    // Update job with results
-    {
-        let mut jobs_write = jobs.write().await;
-        if let Some(job) = jobs_write.get_mut(&job_id) {
-            job.completed_at = Some(Utc::now());
-
-            match result {
-                Ok(scrape_result) => {
-                    job.status = JobStatus::Completed;
-                    job.vehicle_count = Some(scrape_result.vehicles.len() as i32);
-                    job.hono_response = hono_response.clone();
-                    info!(
-                        "Vehicle job {} completed successfully with {} vehicles",
-                        job_id,
-                        scrape_result.vehicles.len()
-                    );
-
-                    if let Some(ref resp) = hono_response {
-                        info!(
-                            "rust-logi Response for job {} - Success: {}, Records: {}/{}",
-                            job_id, resp.success, resp.records_added, resp.total_records
-                        );
+            // Send to gRPC if enabled and data was retrieved
+            let hono_response = match &result {
+                Ok(scrape_result) if !config.rust_logi_url.is_empty() => {
+                    match send_to_rust_logi(&config, &scrape_result.raw_data).await {
+                        Ok(resp) => Some(resp),
+                        Err(e) => {
+                            warn!("Failed to send to rust-logi: {}", e);
+                            None
+                        }
                     }
                 }
-                Err(e) => {
+                _ => None,
+            };
+
+            // Send DVR notifications to rust-logi if any
+            if let Ok(ref scrape_result) = result {
+                if !scrape_result.video_notifications.is_empty()
+                    && !config.rust_logi_url.is_empty()
+                {
+                    if let Err(e) = send_dvr_notifications_to_rust_logi(
+                        &config,
+                        &scrape_result.video_notifications,
+                    )
+                    .await
+                    {
+                        warn!("Failed to send DVR notifications to rust-logi: {}", e);
+                    }
+                }
+            }
+
+            // Update job with results
+            {
+                let mut jobs_write = jobs.write().await;
+                if let Some(job) = jobs_write.get_mut(&job_id) {
+                    job.completed_at = Some(Utc::now());
+
+                    match result {
+                        Ok(scrape_result) => {
+                            job.status = JobStatus::Completed;
+                            job.vehicle_count = Some(scrape_result.vehicles.len() as i32);
+                            job.hono_response = hono_response.clone();
+                            info!(
+                                "Vehicle job {} completed successfully with {} vehicles",
+                                job_id,
+                                scrape_result.vehicles.len()
+                            );
+
+                            if let Some(ref resp) = hono_response {
+                                info!(
+                                    "rust-logi Response for job {} - Success: {}, Records: {}/{}",
+                                    job_id, resp.success, resp.records_added, resp.total_records
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            job.status = JobStatus::Failed;
+                            job.error = Some(e.to_string());
+                            error!("Vehicle job {} failed: {}", job_id, e);
+                        }
+                    }
+                }
+            }
+        }
+        Err(_elapsed) => {
+            // Timeout: scraping took too long, likely browser hung
+            error!(
+                "Vehicle job {} TIMED OUT after {}s - forcing cleanup",
+                job_id,
+                job_timeout.as_secs()
+            );
+
+            {
+                let mut jobs_write = jobs.write().await;
+                if let Some(job) = jobs_write.get_mut(&job_id) {
+                    job.completed_at = Some(Utc::now());
                     job.status = JobStatus::Failed;
-                    job.error = Some(e.to_string());
-                    error!("Vehicle job {} failed: {}", job_id, e);
+                    job.error = Some(format!(
+                        "Job timed out after {}s. Browser may have hung during page evaluation.",
+                        job_timeout.as_secs()
+                    ));
                 }
             }
         }
     }
 
-    // Close scraper
+    // Close scraper (runs in BOTH normal and timeout paths to kill hung browser)
     if let Err(e) = scraper.close().await {
-        warn!("Failed to close scraper: {}", e);
+        warn!("Failed to close scraper for job {}: {}", job_id, e);
     }
 
     // Decrement running count
