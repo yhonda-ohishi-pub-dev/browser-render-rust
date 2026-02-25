@@ -709,89 +709,24 @@ async fn process_vehicle_job(
     });
 }
 
-/// Get ID token from GCE metadata server for Cloud Run authentication
-#[cfg(feature = "grpc")]
-async fn get_gce_id_token(audience: &str) -> Result<String, String> {
-    let metadata_url = format!(
-        "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience={}",
-        audience
-    );
-
-    let client = reqwest::Client::new();
-    let response = client
-        .get(&metadata_url)
-        .header("Metadata-Flavor", "Google")
-        .send()
-        .await
-        .map_err(|e| format!("Failed to fetch ID token: {}", e))?;
-
-    if !response.status().is_success() {
-        return Err(format!("Metadata server returned status: {}", response.status()));
-    }
-
-    response
-        .text()
-        .await
-        .map_err(|e| format!("Failed to read ID token: {}", e))
-}
-
-/// Send raw data to rust-logi via gRPC
+/// Send raw data to rust-logi via gRPC-Web (HTTP/1.1)
 #[cfg(feature = "grpc")]
 async fn send_to_rust_logi(
     config: &Config,
     raw_data: &[serde_json::Value],
 ) -> Result<HonoApiResponse, String> {
-    use crate::logi::dtakologs::dtakologs_service_client::DtakologsServiceClient;
-    use crate::logi::dtakologs::{BulkCreateDtakologsRequest, Dtakolog};
-    use tonic::metadata::MetadataValue;
-    use tonic::Request;
+    use crate::grpc_web_client::grpc_web_call;
+    use crate::logi::dtakologs::{BulkCreateDtakologsRequest, BulkCreateDtakologsResponse, Dtakolog};
 
     if config.rust_logi_url.is_empty() {
         return Err("RUST_LOGI_URL not configured".to_string());
     }
 
     info!(
-        "send_to_rust_logi: Sending {} records to {}",
+        "send_to_rust_logi: Sending {} records to {} (gRPC-Web)",
         raw_data.len(),
         config.rust_logi_url
     );
-
-    // Get ID token for Cloud Run authentication (only for HTTPS URLs)
-    let id_token = if config.rust_logi_url.starts_with("https://") {
-        match get_gce_id_token(&config.rust_logi_url).await {
-            Ok(token) => {
-                info!("Got ID token for Cloud Run authentication");
-                Some(token)
-            }
-            Err(e) => {
-                warn!("Failed to get ID token (not running on GCE?): {}", e);
-                None
-            }
-        }
-    } else {
-        None
-    };
-
-    // Create gRPC client with TLS for HTTPS URLs
-    let channel = if config.rust_logi_url.starts_with("https://") {
-        info!("Connecting with TLS (webpki-roots) to {}", config.rust_logi_url);
-        tonic::transport::Channel::from_shared(config.rust_logi_url.clone())
-            .map_err(|e| format!("Invalid URL: {}", e))?
-            .tls_config(tonic::transport::ClientTlsConfig::new().with_webpki_roots())
-            .map_err(|e| format!("TLS config failed: {}", e))?
-            .connect()
-            .await
-            .map_err(|e| format!("Connection failed: {:?}", e))?
-    } else {
-        info!("Connecting without TLS to {}", config.rust_logi_url);
-        tonic::transport::Channel::from_shared(config.rust_logi_url.clone())
-            .map_err(|e| format!("Invalid URL: {}", e))?
-            .connect()
-            .await
-            .map_err(|e| format!("Connection failed: {:?}", e))?
-    };
-
-    let mut client = DtakologsServiceClient::new(channel);
 
     // Convert raw data to Dtakolog messages
     let dtakologs: Vec<Dtakolog> = raw_data
@@ -861,35 +796,18 @@ async fn send_to_rust_logi(
 
     info!("Converted {} records to Dtakolog messages", dtakologs.len());
 
-    // Create request with headers
-    let mut request = Request::new(BulkCreateDtakologsRequest { dtakologs });
+    let request = BulkCreateDtakologsRequest { dtakologs };
 
-    // Add ID token for Cloud Run authentication
-    if let Some(ref token) = id_token {
-        let auth_value = format!("Bearer {}", token);
-        request.metadata_mut().insert(
-            "authorization",
-            MetadataValue::try_from(&auth_value)
-                .map_err(|e| format!("Invalid authorization header: {}", e))?,
-        );
-    }
+    let client = reqwest::Client::new();
+    let resp: BulkCreateDtakologsResponse = grpc_web_call(
+        &client,
+        &config.rust_logi_url,
+        "/logi.dtakologs.DtakologsService/BulkCreate",
+        &request,
+        &config.rust_logi_organization_id,
+    )
+    .await?;
 
-    // Add organization ID header
-    if !config.rust_logi_organization_id.is_empty() {
-        request.metadata_mut().insert(
-            "x-organization-id",
-            MetadataValue::try_from(&config.rust_logi_organization_id)
-                .map_err(|e| format!("Invalid organization ID: {}", e))?,
-        );
-    }
-
-    // Send request
-    let response = client
-        .bulk_create(request)
-        .await
-        .map_err(|e| format!("BulkCreate failed: {}", e))?;
-
-    let resp = response.into_inner();
     info!(
         "rust-logi response: success={}, records_added={}, total_records={}, message={}",
         resp.success, resp.records_added, resp.total_records, resp.message
@@ -931,16 +849,16 @@ async fn send_to_rust_logi(
     Err("grpc feature not enabled".to_string())
 }
 
-/// Send DVR video notifications to rust-logi via gRPC
+/// Send DVR video notifications to rust-logi via gRPC-Web (HTTP/1.1)
 #[cfg(feature = "grpc")]
 async fn send_dvr_notifications_to_rust_logi(
     config: &Config,
     notifications: &[scraper_service::VideoNotificationResult],
 ) -> Result<(), String> {
-    use crate::logi::dvr_notifications::dvr_notifications_service_client::DvrNotificationsServiceClient;
-    use crate::logi::dvr_notifications::{BulkCreateDvrNotificationsRequest, DvrNotification};
-    use tonic::metadata::MetadataValue;
-    use tonic::Request;
+    use crate::grpc_web_client::grpc_web_call;
+    use crate::logi::dvr_notifications::{
+        BulkCreateDvrNotificationsRequest, BulkCreateDvrNotificationsResponse, DvrNotification,
+    };
 
     if config.rust_logi_url.is_empty() {
         return Err("RUST_LOGI_URL not configured".to_string());
@@ -952,42 +870,10 @@ async fn send_dvr_notifications_to_rust_logi(
     }
 
     info!(
-        "send_dvr_notifications: Sending {} notifications to {}",
+        "send_dvr_notifications: Sending {} notifications to {} (gRPC-Web)",
         notifications.len(),
         config.rust_logi_url
     );
-
-    // Get ID token for Cloud Run authentication (only for HTTPS URLs)
-    let id_token = if config.rust_logi_url.starts_with("https://") {
-        match get_gce_id_token(&config.rust_logi_url).await {
-            Ok(token) => Some(token),
-            Err(e) => {
-                warn!("Failed to get ID token (not running on GCE?): {}", e);
-                None
-            }
-        }
-    } else {
-        None
-    };
-
-    // Create gRPC client with TLS for HTTPS URLs
-    let channel = if config.rust_logi_url.starts_with("https://") {
-        tonic::transport::Channel::from_shared(config.rust_logi_url.clone())
-            .map_err(|e| format!("Invalid URL: {}", e))?
-            .tls_config(tonic::transport::ClientTlsConfig::new().with_webpki_roots())
-            .map_err(|e| format!("TLS config failed: {}", e))?
-            .connect()
-            .await
-            .map_err(|e| format!("Connection failed: {:?}", e))?
-    } else {
-        tonic::transport::Channel::from_shared(config.rust_logi_url.clone())
-            .map_err(|e| format!("Invalid URL: {}", e))?
-            .connect()
-            .await
-            .map_err(|e| format!("Connection failed: {:?}", e))?
-    };
-
-    let mut client = DvrNotificationsServiceClient::new(channel);
 
     // Convert to proto messages
     let dvr_notifications: Vec<DvrNotification> = notifications
@@ -1004,37 +890,20 @@ async fn send_dvr_notifications_to_rust_logi(
         })
         .collect();
 
-    // Create request with headers
-    let mut request = Request::new(BulkCreateDvrNotificationsRequest {
+    let request = BulkCreateDvrNotificationsRequest {
         notifications: dvr_notifications,
-    });
+    };
 
-    // Add ID token for Cloud Run authentication
-    if let Some(ref token) = id_token {
-        let auth_value = format!("Bearer {}", token);
-        request.metadata_mut().insert(
-            "authorization",
-            MetadataValue::try_from(&auth_value)
-                .map_err(|e| format!("Invalid authorization header: {}", e))?,
-        );
-    }
+    let client = reqwest::Client::new();
+    let resp: BulkCreateDvrNotificationsResponse = grpc_web_call(
+        &client,
+        &config.rust_logi_url,
+        "/logi.dvr_notifications.DvrNotificationsService/BulkCreate",
+        &request,
+        &config.rust_logi_organization_id,
+    )
+    .await?;
 
-    // Add organization ID header
-    if !config.rust_logi_organization_id.is_empty() {
-        request.metadata_mut().insert(
-            "x-organization-id",
-            MetadataValue::try_from(&config.rust_logi_organization_id)
-                .map_err(|e| format!("Invalid organization ID: {}", e))?,
-        );
-    }
-
-    // Send request
-    let response = client
-        .bulk_create(request)
-        .await
-        .map_err(|e| format!("DVR BulkCreate failed: {}", e))?;
-
-    let resp = response.into_inner();
     info!(
         "DVR notifications sent: success={}, records_added={}, total_records={}, message={}",
         resp.success, resp.records_added, resp.total_records, resp.message

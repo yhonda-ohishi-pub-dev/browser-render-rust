@@ -1,5 +1,7 @@
 pub mod browser;
 pub mod config;
+#[cfg(feature = "grpc")]
+pub mod grpc_web_client;
 pub mod jobs;
 pub mod server;
 pub mod storage;

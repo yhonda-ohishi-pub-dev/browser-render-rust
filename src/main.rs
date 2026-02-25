@@ -1,5 +1,7 @@
 mod browser;
 mod config;
+#[cfg(feature = "grpc")]
+mod grpc_web_client;
 mod jobs;
 mod logging;
 mod server;
