@@ -70,6 +70,7 @@ pub struct Config {
     // rust-logi API settings
     pub rust_logi_url: String,
     pub rust_logi_organization_id: String,
+    pub grpc_send_timeout: Duration,
 
     // Logging settings
     pub log_format: LogFormat,
@@ -99,6 +100,7 @@ impl Config {
             cookie_ttl: get_env_duration("COOKIE_TTL", Duration::from_secs(86400)), // 24 hours
             rust_logi_url: get_env("RUST_LOGI_URL", ""),
             rust_logi_organization_id: get_env("RUST_LOGI_ORGANIZATION_ID", ""),
+            grpc_send_timeout: get_env_duration("GRPC_SEND_TIMEOUT", Duration::from_secs(30)),
             log_format: LogFormat::from_str(&get_env("LOG_FORMAT", "text")),
             log_file: env::var("LOG_FILE").ok(),
             log_dir: get_env("LOG_DIR", "./logs"),

@@ -602,12 +602,14 @@ async fn process_vehicle_job(
             // Normal completion (success or scraper error)
 
             // Send to gRPC if enabled and data was retrieved
+            let mut grpc_send_error: Option<String> = None;
             let hono_response = match &result {
                 Ok(scrape_result) if !config.rust_logi_url.is_empty() => {
                     match send_to_rust_logi(&config, &scrape_result.raw_data).await {
                         Ok(resp) => Some(resp),
                         Err(e) => {
-                            warn!("Failed to send to rust-logi: {}", e);
+                            error!("Failed to send to rust-logi: {}", e);
+                            grpc_send_error = Some(e);
                             None
                         }
                     }
@@ -639,14 +641,28 @@ async fn process_vehicle_job(
 
                     match result {
                         Ok(scrape_result) => {
-                            job.status = JobStatus::Completed;
                             job.vehicle_count = Some(scrape_result.vehicles.len() as i32);
                             job.hono_response = hono_response.clone();
-                            info!(
-                                "Vehicle job {} completed successfully with {} vehicles",
-                                job_id,
-                                scrape_result.vehicles.len()
-                            );
+
+                            if let Some(ref grpc_err) = grpc_send_error {
+                                job.status = JobStatus::Failed;
+                                job.error = Some(format!(
+                                    "Scraping succeeded ({} vehicles) but rust-logi send failed: {}",
+                                    scrape_result.vehicles.len(),
+                                    grpc_err
+                                ));
+                                error!(
+                                    "Vehicle job {} failed: scraping OK but rust-logi send failed: {}",
+                                    job_id, grpc_err
+                                );
+                            } else {
+                                job.status = JobStatus::Completed;
+                                info!(
+                                    "Vehicle job {} completed successfully with {} vehicles",
+                                    job_id,
+                                    scrape_result.vehicles.len()
+                                );
+                            }
 
                             if let Some(ref resp) = hono_response {
                                 info!(
@@ -798,7 +814,10 @@ async fn send_to_rust_logi(
 
     let request = BulkCreateDtakologsRequest { dtakologs };
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(config.grpc_send_timeout)
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
     let resp: BulkCreateDtakologsResponse = grpc_web_call(
         &client,
         &config.rust_logi_url,
@@ -894,7 +913,10 @@ async fn send_dvr_notifications_to_rust_logi(
         notifications: dvr_notifications,
     };
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(config.grpc_send_timeout)
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
     let resp: BulkCreateDvrNotificationsResponse = grpc_web_call(
         &client,
         &config.rust_logi_url,
