@@ -1,5 +1,5 @@
 #!/bin/bash
-# Pre-push hook: Build and deploy to GCE
+# Pre-push hook: Build and deploy to Kagoya VPS
 # To enable: git config core.hooksPath .githooks
 
 set -e
@@ -7,6 +7,6 @@ set -e
 echo "=== Pre-push: Starting deploy ==="
 
 # Run deploy script
-./scripts/deploy.sh
+./scripts/deploy-kagoya.sh
 
 echo "=== Pre-push: Deploy complete ==="
