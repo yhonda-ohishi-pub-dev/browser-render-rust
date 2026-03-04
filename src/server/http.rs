@@ -177,6 +177,15 @@ struct HealthResponse {
     version: String,
     uptime: f64,
     env: EnvStatus,
+    rust_logi: Option<RustLogiStatus>,
+}
+
+#[derive(Serialize)]
+struct RustLogiStatus {
+    url: String,
+    reachable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -595,14 +604,61 @@ async fn handle_health(State(state): State<Arc<AppState>>) -> impl IntoResponse 
     let etc_accounts = std::env::var("ETC_ACCOUNTS").is_ok();
     let etc_download_path = std::env::var("ETC_DOWNLOAD_PATH").ok();
 
+    // Check rust-logi connectivity via gRPC Health
+    let rust_logi = if !state.config.rust_logi_url.is_empty() {
+        let url = state.config.rust_logi_url.clone();
+        let health_url = format!(
+            "{}/grpc.health.v1.Health/Check",
+            url.trim_end_matches('/')
+        );
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .unwrap();
+        // gRPC-Web Health request: empty HealthCheckRequest
+        let body: Vec<u8> = vec![0x00, 0x00, 0x00, 0x00, 0x00]; // empty proto in grpc-web frame
+        let result = client
+            .post(&health_url)
+            .header("content-type", "application/grpc-web+proto")
+            .body(body)
+            .send()
+            .await;
+        match result {
+            Ok(resp) if resp.status().is_success() => Some(RustLogiStatus {
+                url,
+                reachable: true,
+                error: None,
+            }),
+            Ok(resp) => Some(RustLogiStatus {
+                url,
+                reachable: false,
+                error: Some(format!("HTTP {}", resp.status())),
+            }),
+            Err(e) => Some(RustLogiStatus {
+                url,
+                reachable: false,
+                error: Some(e.to_string()),
+            }),
+        }
+    } else {
+        None
+    };
+
+    let status = if rust_logi.as_ref().is_some_and(|r| !r.reachable) {
+        "degraded"
+    } else {
+        "healthy"
+    };
+
     Json(HealthResponse {
-        status: "healthy".to_string(),
+        status: status.to_string(),
         version: "1.0.0".to_string(),
         uptime,
         env: EnvStatus {
             etc_accounts,
             etc_download_path,
         },
+        rust_logi,
     })
 }
 
