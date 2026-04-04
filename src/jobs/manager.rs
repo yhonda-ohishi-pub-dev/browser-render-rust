@@ -772,14 +772,12 @@ async fn send_dtakologs(
         .iter()
         .filter_map(|v| {
             let mut obj = v.as_object()?.clone();
-            let dt_str = obj
-                .get("DataDateTime")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            obj.insert(
-                "DataDateTime".to_string(),
-                serde_json::Value::String(convert_data_date_time(dt_str)),
-            );
+            if let Some(dt) = obj.get("DataDateTime").and_then(|v| v.as_str()) {
+                obj.insert(
+                    "DataDateTime".to_string(),
+                    serde_json::Value::String(convert_data_date_time(dt)),
+                );
+            }
             Some(serde_json::Value::Object(obj))
         })
         .collect();
