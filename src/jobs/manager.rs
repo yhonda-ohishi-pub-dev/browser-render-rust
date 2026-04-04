@@ -2,7 +2,7 @@ use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc, offset::FixedOffset};
+use chrono::{offset::FixedOffset, DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, Semaphore};
 use tokio::time::{sleep, Duration};
@@ -35,9 +35,9 @@ impl std::fmt::Display for JobType {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
 #[serde(rename_all = "lowercase")]
 pub enum JobPriority {
-    Low,      // Run when idle
-    Normal,   // Normal priority
-    High,     // Run immediately
+    Low,    // Run when idle
+    Normal, // Normal priority
+    High,   // Run immediately
 }
 
 impl Default for JobPriority {
@@ -242,7 +242,10 @@ impl JobManager {
     /// Format current timestamp in JST (Japan Standard Time, UTC+9)
     fn format_jst_timestamp() -> String {
         let jst = FixedOffset::east_opt(9 * 3600).unwrap(); // JST = UTC+9
-        Utc::now().with_timezone(&jst).format("%Y%m%d_%H%M%S").to_string()
+        Utc::now()
+            .with_timezone(&jst)
+            .format("%Y%m%d_%H%M%S")
+            .to_string()
     }
 
     /// Check if the system is idle (no jobs running)
@@ -295,8 +298,18 @@ impl JobManager {
         tokio::spawn(async move {
             // Acquire semaphore permit - only one vehicle job can run at a time
             let _permit = semaphore.acquire().await.expect("Semaphore closed");
-            info!("Vehicle job {} acquired semaphore, starting execution", job_id_clone);
-            process_vehicle_job(jobs, config, running_count, job_id_clone, vehicle_job_timeout).await;
+            info!(
+                "Vehicle job {} acquired semaphore, starting execution",
+                job_id_clone
+            );
+            process_vehicle_job(
+                jobs,
+                config,
+                running_count,
+                job_id_clone,
+                vehicle_job_timeout,
+            )
+            .await;
             // Permit is automatically released when _permit is dropped
         });
 
@@ -365,7 +378,11 @@ impl JobManager {
     }
 
     /// Create a new ETC batch scrape job (multiple accounts)
-    pub async fn create_etc_batch_job(&self, request: EtcBatchRequest, priority: JobPriority) -> String {
+    pub async fn create_etc_batch_job(
+        &self,
+        request: EtcBatchRequest,
+        priority: JobPriority,
+    ) -> String {
         let job_id = Uuid::new_v4().to_string();
         let total_count = request.accounts.len();
 
@@ -384,11 +401,7 @@ impl JobManager {
             .collect();
 
         // Create session folder with timestamp (JST)
-        let session_folder = format!(
-            "{}/{}",
-            request.download_path,
-            Self::format_jst_timestamp()
-        );
+        let session_folder = format!("{}/{}", request.download_path, Self::format_jst_timestamp());
 
         let job = Job {
             id: job_id.clone(),
@@ -443,7 +456,14 @@ impl JobManager {
                 let job_id_clone = job_id.clone();
 
                 tokio::spawn(async move {
-                    process_etc_batch_job(jobs, running_count, job_id_clone, request, session_folder).await;
+                    process_etc_batch_job(
+                        jobs,
+                        running_count,
+                        job_id_clone,
+                        request,
+                        session_folder,
+                    )
+                    .await;
                 });
             }
         }
@@ -470,7 +490,12 @@ impl JobManager {
                 let jobs = self.jobs.read().await;
                 if let Some(job) = jobs.get(&queued.id) {
                     let sf = job.batch_result.as_ref().map(|r| r.session_folder.clone());
-                    (Some(job.job_type.clone()), job.etc_request.clone(), job.batch_request.clone(), sf)
+                    (
+                        Some(job.job_type.clone()),
+                        job.etc_request.clone(),
+                        job.batch_request.clone(),
+                        sf,
+                    )
                 } else {
                     (None, None, None, None)
                 }
@@ -601,15 +626,15 @@ async fn process_vehicle_job(
         Ok(result) => {
             // Normal completion (success or scraper error)
 
-            // Send to gRPC if enabled and data was retrieved
-            let mut grpc_send_error: Option<String> = None;
+            // Send dtakologs to rust-alc-api REST if enabled
+            let mut send_error: Option<String> = None;
             let hono_response = match &result {
-                Ok(scrape_result) if !config.rust_logi_url.is_empty() => {
-                    match send_to_rust_logi(&config, &scrape_result.raw_data).await {
+                Ok(scrape_result) if !config.rust_alc_api_url.is_empty() => {
+                    match send_dtakologs(&config, &scrape_result.raw_data).await {
                         Ok(resp) => Some(resp),
                         Err(e) => {
-                            error!("Failed to send to rust-logi: {}", e);
-                            grpc_send_error = Some(e);
+                            error!("Failed to send dtakologs: {}", e);
+                            send_error = Some(e);
                             None
                         }
                     }
@@ -619,8 +644,7 @@ async fn process_vehicle_job(
 
             // Send DVR notifications to rust-logi if any
             if let Ok(ref scrape_result) = result {
-                if !scrape_result.video_notifications.is_empty()
-                    && !config.rust_logi_url.is_empty()
+                if !scrape_result.video_notifications.is_empty() && !config.rust_logi_url.is_empty()
                 {
                     if let Err(e) = send_dvr_notifications_to_rust_logi(
                         &config,
@@ -644,16 +668,16 @@ async fn process_vehicle_job(
                             job.vehicle_count = Some(scrape_result.vehicles.len() as i32);
                             job.hono_response = hono_response.clone();
 
-                            if let Some(ref grpc_err) = grpc_send_error {
+                            if let Some(ref err) = send_error {
                                 job.status = JobStatus::Failed;
                                 job.error = Some(format!(
-                                    "Scraping succeeded ({} vehicles) but rust-logi send failed: {}",
+                                    "Scraping succeeded ({} vehicles) but dtakologs send failed: {}",
                                     scrape_result.vehicles.len(),
-                                    grpc_err
+                                    err
                                 ));
                                 error!(
-                                    "Vehicle job {} failed: scraping OK but rust-logi send failed: {}",
-                                    job_id, grpc_err
+                                    "Vehicle job {} failed: scraping OK but dtakologs send failed: {}",
+                                    job_id, err
                                 );
                             } else {
                                 job.status = JobStatus::Completed;
@@ -666,7 +690,7 @@ async fn process_vehicle_job(
 
                             if let Some(ref resp) = hono_response {
                                 info!(
-                                    "rust-logi Response for job {} - Success: {}, Records: {}/{}",
+                                    "Dtakologs response for job {} - Success: {}, Records: {}/{}",
                                     job_id, resp.success, resp.records_added, resp.total_records
                                 );
                             }
@@ -725,126 +749,85 @@ async fn process_vehicle_job(
     });
 }
 
-/// Send raw data to rust-logi via gRPC-Web (HTTP/1.1)
-#[cfg(feature = "grpc")]
-async fn send_to_rust_logi(
+/// Send dtakologs to rust-alc-api via REST POST
+async fn send_dtakologs(
     config: &Config,
     raw_data: &[serde_json::Value],
 ) -> Result<HonoApiResponse, String> {
-    use crate::grpc_web_client::grpc_web_call;
-    use crate::logi::dtakologs::{BulkCreateDtakologsRequest, BulkCreateDtakologsResponse, Dtakolog};
-
-    if config.rust_logi_url.is_empty() {
-        return Err("RUST_LOGI_URL not configured".to_string());
+    if config.rust_alc_api_url.is_empty() {
+        return Err("RUST_ALC_API_URL not configured".to_string());
+    }
+    if config.tenant_id.is_empty() {
+        return Err("TENANT_ID not configured".to_string());
     }
 
     info!(
-        "send_to_rust_logi: Sending {} records to {} (gRPC-Web)",
+        "send_dtakologs: Sending {} records to {} (REST)",
         raw_data.len(),
-        config.rust_logi_url
+        config.rust_alc_api_url
     );
 
-    // Convert raw data to Dtakolog messages
-    let dtakologs: Vec<Dtakolog> = raw_data
+    // Convert DataDateTime from "YY/MM/DD HH:MM" to ISO8601 in each record
+    let records: Vec<serde_json::Value> = raw_data
         .iter()
         .filter_map(|v| {
-            let obj = v.as_object()?;
-            Some(Dtakolog {
-                r#type: obj.get("__type")?.as_str()?.to_string(),
-                address_disp_c: obj.get("AddressDispC").and_then(|v| v.as_str()).map(String::from),
-                address_disp_p: obj.get("AddressDispP").and_then(|v| v.as_str()).map(String::from),
-                all_state: obj.get("AllState").and_then(|v| v.as_str()).map(String::from),
-                all_state_ex: obj.get("AllStateEx").and_then(|v| v.as_str()).map(String::from),
-                all_state_font_color: obj.get("AllStateFontColor").and_then(|v| v.as_str()).map(String::from),
-                all_state_font_color_index: obj.get("AllStateFontColorIndex").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
-                all_state_ryout_color: obj.get("AllStateRyoutColor").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                branch_cd: obj.get("BranchCD").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
-                branch_name: obj.get("BranchName").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                comu_date_time: obj.get("ComuDateTime").and_then(|v| v.as_str()).map(String::from),
-                current_work_cd: obj.get("CurrentWorkCD").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
-                current_work_name: obj.get("CurrentWorkName").and_then(|v| v.as_str()).map(String::from),
-                data_date_time: convert_data_date_time(obj.get("DataDateTime").and_then(|v| v.as_str()).unwrap_or("")),
-                data_filter_type: obj.get("DataFilterType").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
-                disp_flag: obj.get("DispFlag").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
-                driver_cd: obj.get("DriverCD").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
-                driver_name: obj.get("DriverName").and_then(|v| v.as_str()).map(String::from),
-                event_val: obj.get("EventVal").and_then(|v| v.as_str()).map(String::from),
-                gps_direction: obj.get("GPSDirection").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
-                gps_enable: obj.get("GPSEnable").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
-                gps_lati_and_long: obj.get("GPSLatiAndLong").and_then(|v| v.as_str()).map(String::from),
-                gps_latitude: obj.get("GPSLatitude").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
-                gps_longitude: obj.get("GPSLongitude").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
-                gps_satellite_num: obj.get("GPSSatelliteNum").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
-                odometer: obj.get("ODOMeter").and_then(|v| v.as_str()).map(String::from),
-                operation_state: obj.get("OperationState").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
-                recive_event_type: obj.get("ReciveEventType").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
-                recive_packet_type: obj.get("RecivePacketType").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
-                recive_type_color_name: obj.get("ReciveTypeColorName").and_then(|v| v.as_str()).map(String::from),
-                recive_type_name: obj.get("ReciveTypeName").and_then(|v| v.as_str()).map(String::from),
-                recive_work_cd: obj.get("ReciveWorkCD").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
-                revo: obj.get("Revo").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
-                setting_temp: obj.get("SettingTemp").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                setting_temp1: obj.get("SettingTemp1").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                setting_temp3: obj.get("SettingTemp3").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                setting_temp4: obj.get("SettingTemp4").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                speed: obj.get("Speed").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32,
-                start_work_date_time: obj.get("StartWorkDateTime").and_then(|v| v.as_str()).map(String::from),
-                state: obj.get("State").and_then(|v| v.as_str()).map(String::from),
-                state1: obj.get("State1").and_then(|v| v.as_str()).map(String::from),
-                state2: obj.get("State2").and_then(|v| v.as_str()).map(String::from),
-                state3: obj.get("State3").and_then(|v| v.as_str()).map(String::from),
-                state_flag: obj.get("StateFlag").and_then(|v| v.as_str()).map(String::from),
-                sub_driver_cd: obj.get("SubDriverCD").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
-                temp1: obj.get("Temp1").and_then(|v| v.as_str()).map(String::from),
-                temp2: obj.get("Temp2").and_then(|v| v.as_str()).map(String::from),
-                temp3: obj.get("Temp3").and_then(|v| v.as_str()).map(String::from),
-                temp4: obj.get("Temp4").and_then(|v| v.as_str()).map(String::from),
-                temp_state: obj.get("TempState").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
-                vehicle_cd: obj.get("VehicleCD").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
-                vehicle_icon_color: obj.get("VehicleIconColor").and_then(|v| v.as_str()).map(String::from),
-                vehicle_icon_label_for_datetime: obj.get("VehicleIconLabelForDatetime").and_then(|v| v.as_str()).map(String::from),
-                vehicle_icon_label_for_driver: obj.get("VehicleIconLabelForDriver").and_then(|v| v.as_str()).map(String::from),
-                vehicle_icon_label_for_vehicle: obj.get("VehicleIconLabelForVehicle").and_then(|v| v.as_str()).map(String::from),
-                vehicle_name: obj.get("VehicleName").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-            })
+            let mut obj = v.as_object()?.clone();
+            if let Some(dt) = obj.get("DataDateTime").and_then(|v| v.as_str()) {
+                obj.insert(
+                    "DataDateTime".to_string(),
+                    serde_json::Value::String(convert_data_date_time(dt)),
+                );
+            }
+            Some(serde_json::Value::Object(obj))
         })
         .collect();
 
-    info!("Converted {} records to Dtakolog messages", dtakologs.len());
-
-    let request = BulkCreateDtakologsRequest { dtakologs };
-
-    let client = reqwest::Client::builder()
-        .timeout(config.grpc_send_timeout)
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
-    let resp: BulkCreateDtakologsResponse = grpc_web_call(
-        &client,
-        &config.rust_logi_url,
-        "/logi.dtakologs.DtakologsService/BulkCreate",
-        &request,
-        &config.rust_logi_organization_id,
-    )
-    .await?;
-
-    info!(
-        "rust-logi response: success={}, records_added={}, total_records={}, message={}",
-        resp.success, resp.records_added, resp.total_records, resp.message
+    let url = format!(
+        "{}/api/dtako-logs/bulk",
+        config.rust_alc_api_url.trim_end_matches('/')
     );
 
-    Ok(HonoApiResponse {
-        success: resp.success,
-        records_added: resp.records_added,
-        total_records: resp.total_records,
-        message: resp.message,
-    })
+    let client = reqwest::Client::builder()
+        .timeout(config.rest_send_timeout)
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    let resp = client
+        .post(&url)
+        .header("X-Tenant-ID", &config.tenant_id)
+        .header("Content-Type", "application/json")
+        .json(&records)
+        .send()
+        .await
+        .map_err(|e| format!("REST request failed: {}", e))?;
+
+    let status = resp.status();
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse response: {}", e))?;
+
+    if !status.is_success() {
+        return Err(format!("REST API returned {}: {:?}", status, body));
+    }
+
+    let result = HonoApiResponse {
+        success: body["success"].as_bool().unwrap_or(false),
+        records_added: body["records_added"].as_i64().unwrap_or(0) as i32,
+        total_records: body["total_records"].as_i64().unwrap_or(0) as i32,
+        message: body["message"].as_str().unwrap_or("").to_string(),
+    };
+
+    info!(
+        "rust-alc-api response: success={}, records_added={}, total_records={}, message={}",
+        result.success, result.records_added, result.total_records, result.message
+    );
+
+    Ok(result)
 }
 
 /// Convert DataDateTime from "YY/MM/DD HH:MM" to ISO8601 format
-#[cfg(feature = "grpc")]
 fn convert_data_date_time(date_str: &str) -> String {
-    use chrono::offset::FixedOffset;
-
     if date_str.is_empty() {
         return "2020-01-01T00:00:00+09:00".to_string();
     }
@@ -856,16 +839,6 @@ fn convert_data_date_time(date_str: &str) -> String {
     }
     // Fallback
     format!("20{}", date_str)
-}
-
-/// Stub for non-grpc feature
-#[cfg(not(feature = "grpc"))]
-async fn send_to_rust_logi(
-    _config: &Config,
-    _raw_data: &[serde_json::Value],
-) -> Result<HonoApiResponse, String> {
-    warn!("grpc feature not enabled - data not sent to rust-logi");
-    Err("grpc feature not enabled".to_string())
 }
 
 /// Send DVR video notifications to rust-logi via gRPC-Web (HTTP/1.1)
@@ -1014,7 +987,7 @@ async fn process_etc_job(
 
 /// Execute ETC scrape using scraper-service
 async fn execute_etc_scrape(request: &EtcScrapeRequest) -> Result<EtcScrapeResult, String> {
-    use scraper_service::{EtcScraper, ScraperConfig, Scraper};
+    use scraper_service::{EtcScraper, Scraper, ScraperConfig};
 
     info!("Starting ETC scrape for user: {}", request.user_id);
 
@@ -1048,7 +1021,7 @@ async fn process_etc_batch_job(
     request: EtcBatchRequest,
     session_folder: String,
 ) {
-    use scraper_service::{EtcScraper, ScraperConfig, ScraperError, Scraper};
+    use scraper_service::{EtcScraper, Scraper, ScraperConfig, ScraperError};
 
     // Increment running count
     {
@@ -1141,10 +1114,7 @@ async fn process_etc_batch_job(
                             }
                             Err(ScraperError::NoUsageData(msg)) => {
                                 // 明細なしは成功扱い（スキップ）
-                                account_result.set_completed(
-                                    format!("skipped: {}", msg),
-                                    0,
-                                );
+                                account_result.set_completed(format!("skipped: {}", msg), 0);
                                 success_count += 1;
                                 info!(
                                     "ETC batch job {}: Account {} skipped (no usage data)",
@@ -1154,10 +1124,7 @@ async fn process_etc_batch_job(
                             Err(e) => {
                                 account_result.set_failed(e.to_string());
                                 fail_count += 1;
-                                error!(
-                                    "ETC batch job {}: Account {} failed: {}",
-                                    job_id, name, e
-                                );
+                                error!("ETC batch job {}: Account {} failed: {}", job_id, name, e);
                             }
                         }
                     }
@@ -1269,7 +1236,10 @@ pub fn start_idle_processor(job_manager: Arc<JobManager>) {
 
             let queue_len = job_manager.queue_length().await;
             if queue_len > 0 && job_manager.is_idle().await {
-                info!("Idle detected, processing queued jobs ({} in queue)", queue_len);
+                info!(
+                    "Idle detected, processing queued jobs ({} in queue)",
+                    queue_len
+                );
                 job_manager.process_idle_jobs().await;
             }
         }

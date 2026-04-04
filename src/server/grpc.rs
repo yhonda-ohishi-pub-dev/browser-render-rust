@@ -30,17 +30,37 @@ use browser_render::browser_render_service_server::{
 };
 use browser_render::etc_scraper_service_server::{EtcScraperService, EtcScraperServiceServer};
 use browser_render::{
-    CheckSessionRequest, CheckSessionResponse, ClearSessionRequest, ClearSessionResponse,
-    GetVehicleDataRequest, GetVehicleDataResponse, HealthCheckRequest, HealthCheckResponse,
+    AccountResult as ProtoAccountResult,
+    CheckSessionRequest,
+    CheckSessionResponse,
+    ClearSessionRequest,
+    ClearSessionResponse,
+    DownloadFileChunk,
+    DownloadFileRequest,
+    EtcBatchEnvRequest,
+    EtcBatchRequest as ProtoEtcBatchRequest,
+    EtcBatchResult as ProtoEtcBatchResult,
     // ETC Scraper types
-    EtcScrapeRequest as ProtoEtcScrapeRequest, EtcScrapeResponse,
-    EtcBatchRequest as ProtoEtcBatchRequest, EtcBatchEnvRequest,
-    GetJobRequest, GetJobResponse, ListJobsRequest, ListJobsResponse,
-    GetQueueStatusRequest, GetQueueStatusResponse,
-    ListSessionsRequest, ListSessionsResponse, ListSessionFilesRequest, ListSessionFilesResponse,
-    DownloadFileRequest, DownloadFileChunk,
-    Job as ProtoJob, EtcScrapeResult as ProtoEtcScrapeResult, EtcBatchResult as ProtoEtcBatchResult,
-    AccountResult as ProtoAccountResult, SessionInfo, FileInfo,
+    EtcScrapeRequest as ProtoEtcScrapeRequest,
+    EtcScrapeResponse,
+    EtcScrapeResult as ProtoEtcScrapeResult,
+    FileInfo,
+    GetJobRequest,
+    GetJobResponse,
+    GetQueueStatusRequest,
+    GetQueueStatusResponse,
+    GetVehicleDataRequest,
+    GetVehicleDataResponse,
+    HealthCheckRequest,
+    HealthCheckResponse,
+    Job as ProtoJob,
+    ListJobsRequest,
+    ListJobsResponse,
+    ListSessionFilesRequest,
+    ListSessionFilesResponse,
+    ListSessionsRequest,
+    ListSessionsResponse,
+    SessionInfo,
 };
 
 /// gRPC server implementation
@@ -122,14 +142,18 @@ fn job_to_proto(job: &crate::jobs::Job) -> ProtoJob {
         }),
         batch_result: job.batch_result.as_ref().map(|r| ProtoEtcBatchResult {
             session_folder: r.session_folder.clone(),
-            accounts: r.accounts.iter().map(|a| ProtoAccountResult {
-                user_id: a.user_id.clone(),
-                name: a.name.clone(),
-                status: format!("{:?}", a.status),
-                csv_path: a.csv_path.clone().unwrap_or_default(),
-                csv_size: a.csv_size.unwrap_or(0) as i32,
-                error: a.error.clone().unwrap_or_default(),
-            }).collect(),
+            accounts: r
+                .accounts
+                .iter()
+                .map(|a| ProtoAccountResult {
+                    user_id: a.user_id.clone(),
+                    name: a.name.clone(),
+                    status: format!("{:?}", a.status),
+                    csv_path: a.csv_path.clone().unwrap_or_default(),
+                    csv_size: a.csv_size.unwrap_or(0) as i32,
+                    error: a.error.clone().unwrap_or_default(),
+                })
+                .collect(),
             total_count: r.total_count as i32,
             success_count: r.success_count as i32,
             fail_count: r.fail_count as i32,
@@ -250,7 +274,10 @@ impl EtcScraperService for GrpcServer {
             .create_etc_job(etc_request, JobPriority::Normal)
             .await;
 
-        info!("Created ETC scrape job (immediate): {} for user {}", job_id, req.user_id);
+        info!(
+            "Created ETC scrape job (immediate): {} for user {}",
+            job_id, req.user_id
+        );
 
         Ok(Response::new(EtcScrapeResponse {
             job_id,
@@ -282,7 +309,10 @@ impl EtcScraperService for GrpcServer {
             .create_etc_job(etc_request, JobPriority::Low)
             .await;
 
-        info!("Created ETC scrape job (queued): {} for user {}", job_id, req.user_id);
+        info!(
+            "Created ETC scrape job (queued): {} for user {}",
+            job_id, req.user_id
+        );
 
         Ok(Response::new(EtcScrapeResponse {
             job_id,
@@ -324,12 +354,18 @@ impl EtcScraperService for GrpcServer {
             .create_etc_batch_job(batch_request, JobPriority::Normal)
             .await;
 
-        info!("Created ETC batch scrape job (immediate): {} for {} accounts", job_id, account_count);
+        info!(
+            "Created ETC batch scrape job (immediate): {} for {} accounts",
+            job_id, account_count
+        );
 
         Ok(Response::new(EtcScrapeResponse {
             job_id,
             status: "pending".to_string(),
-            message: format!("ETC batch scrape job created for {} accounts.", account_count),
+            message: format!(
+                "ETC batch scrape job created for {} accounts.",
+                account_count
+            ),
         }))
     }
 
@@ -366,12 +402,18 @@ impl EtcScraperService for GrpcServer {
             .create_etc_batch_job(batch_request, JobPriority::Low)
             .await;
 
-        info!("Created ETC batch scrape job (queued): {} for {} accounts", job_id, account_count);
+        info!(
+            "Created ETC batch scrape job (queued): {} for {} accounts",
+            job_id, account_count
+        );
 
         Ok(Response::new(EtcScrapeResponse {
             job_id,
             status: "queued".to_string(),
-            message: format!("ETC batch scrape job queued for {} accounts.", account_count),
+            message: format!(
+                "ETC batch scrape job queued for {} accounts.",
+                account_count
+            ),
         }))
     }
 
@@ -405,12 +447,18 @@ impl EtcScraperService for GrpcServer {
             .create_etc_batch_job(batch_request, JobPriority::Normal)
             .await;
 
-        info!("Created ETC batch scrape job from env (immediate): {} for {} accounts", job_id, account_count);
+        info!(
+            "Created ETC batch scrape job from env (immediate): {} for {} accounts",
+            job_id, account_count
+        );
 
         Ok(Response::new(EtcScrapeResponse {
             job_id,
             status: "pending".to_string(),
-            message: format!("ETC batch scrape job created for {} accounts from env.", account_count),
+            message: format!(
+                "ETC batch scrape job created for {} accounts from env.",
+                account_count
+            ),
         }))
     }
 
@@ -444,12 +492,18 @@ impl EtcScraperService for GrpcServer {
             .create_etc_batch_job(batch_request, JobPriority::Low)
             .await;
 
-        info!("Created ETC batch scrape job from env (queued): {} for {} accounts", job_id, account_count);
+        info!(
+            "Created ETC batch scrape job from env (queued): {} for {} accounts",
+            job_id, account_count
+        );
 
         Ok(Response::new(EtcScrapeResponse {
             job_id,
             status: "queued".to_string(),
-            message: format!("ETC batch scrape job queued for {} accounts from env.", account_count),
+            message: format!(
+                "ETC batch scrape job queued for {} accounts from env.",
+                account_count
+            ),
         }))
     }
 
@@ -568,7 +622,10 @@ impl EtcScraperService for GrpcServer {
         }
 
         // Prevent path traversal
-        if req.session_id.contains("..") || req.session_id.contains('/') || req.session_id.contains('\\') {
+        if req.session_id.contains("..")
+            || req.session_id.contains('/')
+            || req.session_id.contains('\\')
+        {
             return Err(Status::invalid_argument("Invalid session ID"));
         }
 
@@ -601,7 +658,9 @@ impl EtcScraperService for GrpcServer {
                         .unwrap_or(false)
                 {
                     let name = entry.file_name().to_string_lossy().to_string();
-                    let size = std::fs::metadata(&path).map(|m| m.len() as i64).unwrap_or(0);
+                    let size = std::fs::metadata(&path)
+                        .map(|m| m.len() as i64)
+                        .unwrap_or(0);
                     Some(FileInfo { name, size })
                 } else {
                     None
@@ -727,7 +786,10 @@ pub async fn start_grpc_server(
     );
     let server2 = GrpcServer::new(config, storage, renderer, job_manager);
 
-    info!("gRPC server starting on {} (gRPC-web enabled, gRPC-web+json enabled)", address);
+    info!(
+        "gRPC server starting on {} (gRPC-web enabled, gRPC-web+json enabled)",
+        address
+    );
 
     let reflection_service = ReflectionBuilder::configure()
         .register_encoded_file_descriptor_set(browser_render::FILE_DESCRIPTOR_SET)
@@ -744,7 +806,7 @@ pub async fn start_grpc_server(
         .accept_http1(true) // Required for gRPC-web
         .layer(cors)
         .layer(GrpcWebJsonLayer::new()) // JSON mode layer (must be before GrpcWebLayer)
-        .layer(GrpcWebLayer::new())     // Standard gRPC-web (protobuf)
+        .layer(GrpcWebLayer::new()) // Standard gRPC-web (protobuf)
         .add_service(reflection_service)
         .add_service(BrowserRenderServiceServer::new(server))
         .add_service(EtcScraperServiceServer::new(server2))

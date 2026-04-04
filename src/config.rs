@@ -67,10 +67,15 @@ pub struct Config {
     pub session_ttl: Duration,
     pub cookie_ttl: Duration,
 
-    // rust-logi API settings
+    // rust-logi API settings (DVR notifications - gRPC)
     pub rust_logi_url: String,
     pub rust_logi_organization_id: String,
     pub grpc_send_timeout: Duration,
+
+    // rust-alc-api settings (dtakologs - REST)
+    pub rust_alc_api_url: String,
+    pub tenant_id: String,
+    pub rest_send_timeout: Duration,
 
     // Logging settings
     pub log_format: LogFormat,
@@ -101,6 +106,9 @@ impl Config {
             rust_logi_url: get_env("RUST_LOGI_URL", ""),
             rust_logi_organization_id: get_env("RUST_LOGI_ORGANIZATION_ID", ""),
             grpc_send_timeout: get_env_duration("GRPC_SEND_TIMEOUT", Duration::from_secs(30)),
+            rust_alc_api_url: get_env("RUST_ALC_API_URL", ""),
+            tenant_id: get_env("TENANT_ID", ""),
+            rest_send_timeout: get_env_duration("REST_SEND_TIMEOUT", Duration::from_secs(30)),
             log_format: LogFormat::from_str(&get_env("LOG_FORMAT", "text")),
             log_file: env::var("LOG_FILE").ok(),
             log_dir: get_env("LOG_DIR", "./logs"),
@@ -112,12 +120,20 @@ impl Config {
             warn!("Authentication credentials not set in environment variables");
         }
 
-        // Validate rust-logi settings
+        // Validate rust-alc-api settings (dtakologs REST)
+        if cfg.rust_alc_api_url.is_empty() {
+            warn!("RUST_ALC_API_URL not set - dtakologs will not be sent");
+        }
+        if cfg.tenant_id.is_empty() {
+            warn!("TENANT_ID not set - required for dtakologs REST API");
+        }
+
+        // Validate rust-logi settings (DVR notifications gRPC)
         if cfg.rust_logi_url.is_empty() {
-            warn!("RUST_LOGI_URL not set - data will not be sent to rust-logi");
+            warn!("RUST_LOGI_URL not set - DVR notifications will not be sent");
         }
         if cfg.rust_logi_organization_id.is_empty() {
-            warn!("RUST_LOGI_ORGANIZATION_ID not set - required for rust-logi");
+            warn!("RUST_LOGI_ORGANIZATION_ID not set - required for DVR notifications");
         }
 
         cfg
@@ -219,18 +235,9 @@ mod tests {
 
     #[test]
     fn test_parse_duration_string() {
-        assert_eq!(
-            parse_duration_string("60s"),
-            Some(Duration::from_secs(60))
-        );
-        assert_eq!(
-            parse_duration_string("10m"),
-            Some(Duration::from_secs(600))
-        );
-        assert_eq!(
-            parse_duration_string("1h"),
-            Some(Duration::from_secs(3600))
-        );
+        assert_eq!(parse_duration_string("60s"), Some(Duration::from_secs(60)));
+        assert_eq!(parse_duration_string("10m"), Some(Duration::from_secs(600)));
+        assert_eq!(parse_duration_string("1h"), Some(Duration::from_secs(3600)));
         assert_eq!(
             parse_duration_string("500ms"),
             Some(Duration::from_millis(500))

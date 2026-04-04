@@ -11,12 +11,12 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use base64::Engine;
-use bytes::{Bytes, BytesMut, Buf};
+use bytes::{Buf, Bytes, BytesMut};
+use futures::future::BoxFuture;
+use futures::StreamExt;
 use http::{header, HeaderValue, Method, Request, Response, StatusCode};
 use http_body::Frame;
 use http_body_util::{BodyExt, Full, StreamBody};
-use futures::future::BoxFuture;
-use futures::StreamExt;
 use prost::Message;
 use serde::{Deserialize, Serialize};
 use tower::{Layer, Service};
@@ -50,69 +50,133 @@ impl GrpcWebJsonLayer {
         // BrowserRenderService methods
         handlers.insert(
             "/browser_render.v1.BrowserRenderService/GetVehicleData".to_string(),
-            HandlerInfo { service: "BrowserRenderService".to_string(), method: "GetVehicleData".to_string(), is_streaming: false },
+            HandlerInfo {
+                service: "BrowserRenderService".to_string(),
+                method: "GetVehicleData".to_string(),
+                is_streaming: false,
+            },
         );
         handlers.insert(
             "/browser_render.v1.BrowserRenderService/CheckSession".to_string(),
-            HandlerInfo { service: "BrowserRenderService".to_string(), method: "CheckSession".to_string(), is_streaming: false },
+            HandlerInfo {
+                service: "BrowserRenderService".to_string(),
+                method: "CheckSession".to_string(),
+                is_streaming: false,
+            },
         );
         handlers.insert(
             "/browser_render.v1.BrowserRenderService/ClearSession".to_string(),
-            HandlerInfo { service: "BrowserRenderService".to_string(), method: "ClearSession".to_string(), is_streaming: false },
+            HandlerInfo {
+                service: "BrowserRenderService".to_string(),
+                method: "ClearSession".to_string(),
+                is_streaming: false,
+            },
         );
         handlers.insert(
             "/browser_render.v1.BrowserRenderService/HealthCheck".to_string(),
-            HandlerInfo { service: "BrowserRenderService".to_string(), method: "HealthCheck".to_string(), is_streaming: false },
+            HandlerInfo {
+                service: "BrowserRenderService".to_string(),
+                method: "HealthCheck".to_string(),
+                is_streaming: false,
+            },
         );
 
         // EtcScraperService methods
         handlers.insert(
             "/browser_render.v1.EtcScraperService/EtcScrape".to_string(),
-            HandlerInfo { service: "EtcScraperService".to_string(), method: "EtcScrape".to_string(), is_streaming: false },
+            HandlerInfo {
+                service: "EtcScraperService".to_string(),
+                method: "EtcScrape".to_string(),
+                is_streaming: false,
+            },
         );
         handlers.insert(
             "/browser_render.v1.EtcScraperService/EtcScrapeQueue".to_string(),
-            HandlerInfo { service: "EtcScraperService".to_string(), method: "EtcScrapeQueue".to_string(), is_streaming: false },
+            HandlerInfo {
+                service: "EtcScraperService".to_string(),
+                method: "EtcScrapeQueue".to_string(),
+                is_streaming: false,
+            },
         );
         handlers.insert(
             "/browser_render.v1.EtcScraperService/EtcScrapeBatch".to_string(),
-            HandlerInfo { service: "EtcScraperService".to_string(), method: "EtcScrapeBatch".to_string(), is_streaming: false },
+            HandlerInfo {
+                service: "EtcScraperService".to_string(),
+                method: "EtcScrapeBatch".to_string(),
+                is_streaming: false,
+            },
         );
         handlers.insert(
             "/browser_render.v1.EtcScraperService/EtcScrapeBatchQueue".to_string(),
-            HandlerInfo { service: "EtcScraperService".to_string(), method: "EtcScrapeBatchQueue".to_string(), is_streaming: false },
+            HandlerInfo {
+                service: "EtcScraperService".to_string(),
+                method: "EtcScrapeBatchQueue".to_string(),
+                is_streaming: false,
+            },
         );
         handlers.insert(
             "/browser_render.v1.EtcScraperService/EtcScrapeBatchEnv".to_string(),
-            HandlerInfo { service: "EtcScraperService".to_string(), method: "EtcScrapeBatchEnv".to_string(), is_streaming: false },
+            HandlerInfo {
+                service: "EtcScraperService".to_string(),
+                method: "EtcScrapeBatchEnv".to_string(),
+                is_streaming: false,
+            },
         );
         handlers.insert(
             "/browser_render.v1.EtcScraperService/EtcScrapeBatchEnvQueue".to_string(),
-            HandlerInfo { service: "EtcScraperService".to_string(), method: "EtcScrapeBatchEnvQueue".to_string(), is_streaming: false },
+            HandlerInfo {
+                service: "EtcScraperService".to_string(),
+                method: "EtcScrapeBatchEnvQueue".to_string(),
+                is_streaming: false,
+            },
         );
         handlers.insert(
             "/browser_render.v1.EtcScraperService/GetJob".to_string(),
-            HandlerInfo { service: "EtcScraperService".to_string(), method: "GetJob".to_string(), is_streaming: false },
+            HandlerInfo {
+                service: "EtcScraperService".to_string(),
+                method: "GetJob".to_string(),
+                is_streaming: false,
+            },
         );
         handlers.insert(
             "/browser_render.v1.EtcScraperService/ListJobs".to_string(),
-            HandlerInfo { service: "EtcScraperService".to_string(), method: "ListJobs".to_string(), is_streaming: false },
+            HandlerInfo {
+                service: "EtcScraperService".to_string(),
+                method: "ListJobs".to_string(),
+                is_streaming: false,
+            },
         );
         handlers.insert(
             "/browser_render.v1.EtcScraperService/GetQueueStatus".to_string(),
-            HandlerInfo { service: "EtcScraperService".to_string(), method: "GetQueueStatus".to_string(), is_streaming: false },
+            HandlerInfo {
+                service: "EtcScraperService".to_string(),
+                method: "GetQueueStatus".to_string(),
+                is_streaming: false,
+            },
         );
         handlers.insert(
             "/browser_render.v1.EtcScraperService/ListSessions".to_string(),
-            HandlerInfo { service: "EtcScraperService".to_string(), method: "ListSessions".to_string(), is_streaming: false },
+            HandlerInfo {
+                service: "EtcScraperService".to_string(),
+                method: "ListSessions".to_string(),
+                is_streaming: false,
+            },
         );
         handlers.insert(
             "/browser_render.v1.EtcScraperService/ListSessionFiles".to_string(),
-            HandlerInfo { service: "EtcScraperService".to_string(), method: "ListSessionFiles".to_string(), is_streaming: false },
+            HandlerInfo {
+                service: "EtcScraperService".to_string(),
+                method: "ListSessionFiles".to_string(),
+                is_streaming: false,
+            },
         );
         handlers.insert(
             "/browser_render.v1.EtcScraperService/DownloadFile".to_string(),
-            HandlerInfo { service: "EtcScraperService".to_string(), method: "DownloadFile".to_string(), is_streaming: true },
+            HandlerInfo {
+                service: "EtcScraperService".to_string(),
+                method: "DownloadFile".to_string(),
+                is_streaming: true,
+            },
         );
 
         GrpcWebJsonLayer {
@@ -157,7 +221,6 @@ where
     body.map_err(|e| tonic::Status::internal(format!("{:?}", e.into())))
         .boxed_unsync()
 }
-
 
 impl<S, ReqBody, ResBody> Service<Request<ReqBody>> for GrpcWebJsonService<S>
 where
@@ -234,7 +297,12 @@ where
                 let flag = body_bytes[0];
                 if flag == 0 || flag == 1 {
                     // This looks like a gRPC frame
-                    let len = u32::from_be_bytes([body_bytes[1], body_bytes[2], body_bytes[3], body_bytes[4]]) as usize;
+                    let len = u32::from_be_bytes([
+                        body_bytes[1],
+                        body_bytes[2],
+                        body_bytes[3],
+                        body_bytes[4],
+                    ]) as usize;
                     if body_bytes.len() >= 5 + len {
                         body_bytes.slice(5..5 + len)
                     } else {
@@ -312,7 +380,9 @@ where
             }
 
             let flag = resp_bytes[0];
-            let len = u32::from_be_bytes([resp_bytes[1], resp_bytes[2], resp_bytes[3], resp_bytes[4]]) as usize;
+            let len =
+                u32::from_be_bytes([resp_bytes[1], resp_bytes[2], resp_bytes[3], resp_bytes[4]])
+                    as usize;
 
             if flag == 0 && resp_bytes.len() >= 5 + len {
                 // Data frame - convert to JSON
@@ -339,7 +409,8 @@ where
                             json_frame.extend_from_slice(trailers.as_bytes());
                         }
 
-                        let mut response = Response::new(boxed_body(Full::new(Bytes::from(json_frame))));
+                        let mut response =
+                            Response::new(boxed_body(Full::new(Bytes::from(json_frame))));
                         *response.status_mut() = resp_parts.status;
                         response.headers_mut().insert(
                             header::CONTENT_TYPE,
@@ -355,7 +426,10 @@ where
                     }
                     Err(e) => {
                         error!("Failed to convert Protobuf to JSON: {}", e);
-                        Ok(create_error_response(&format!("Failed to convert response: {}", e)))
+                        Ok(create_error_response(&format!(
+                            "Failed to convert response: {}",
+                            e
+                        )))
                     }
                 }
             } else {
@@ -413,7 +487,10 @@ where
         while state.buffer.len() >= 5 {
             let flag = state.buffer[0];
             let len = u32::from_be_bytes([
-                state.buffer[1], state.buffer[2], state.buffer[3], state.buffer[4]
+                state.buffer[1],
+                state.buffer[2],
+                state.buffer[3],
+                state.buffer[4],
             ]) as usize;
 
             if state.buffer.len() < 5 + len {
@@ -495,19 +572,21 @@ where
         }
     })
     // Filter out empty frames (used for continuation)
-    .filter_map(|result: Result<Frame<Bytes>, std::convert::Infallible>| async move {
-        match result {
-            Ok(frame) => {
-                if let Some(data) = frame.data_ref() {
-                    if data.is_empty() {
-                        return None; // Skip empty continuation frames
+    .filter_map(
+        |result: Result<Frame<Bytes>, std::convert::Infallible>| async move {
+            match result {
+                Ok(frame) => {
+                    if let Some(data) = frame.data_ref() {
+                        if data.is_empty() {
+                            return None; // Skip empty continuation frames
+                        }
                     }
+                    Some(Ok(frame))
                 }
-                Some(Ok(frame))
+                Err(e) => Some(Err(e)),
             }
-            Err(e) => Some(Err(e)),
-        }
-    });
+        },
+    );
 
     let body = StreamBody::new(stream);
     let mut response = Response::new(boxed_body(body));
@@ -599,25 +678,26 @@ fn convert_json_to_proto(method: &str, json_bytes: &[u8]) -> Result<Vec<u8>, Str
                 branch_id: req.branch_id.unwrap_or_default(),
                 filter_id: req.filter_id.unwrap_or_default(),
                 force_login: req.force_login.unwrap_or(false),
-            }.encode_to_vec())
+            }
+            .encode_to_vec())
         }
         "CheckSession" => {
             let req: CheckSessionJson = serde_json::from_slice(json_bytes)
                 .map_err(|e| format!("JSON parse error: {}", e))?;
             Ok(browser_render::CheckSessionRequest {
                 session_id: req.session_id.unwrap_or_default(),
-            }.encode_to_vec())
+            }
+            .encode_to_vec())
         }
         "ClearSession" => {
             let req: ClearSessionJson = serde_json::from_slice(json_bytes)
                 .map_err(|e| format!("JSON parse error: {}", e))?;
             Ok(browser_render::ClearSessionRequest {
                 session_id: req.session_id.unwrap_or_default(),
-            }.encode_to_vec())
+            }
+            .encode_to_vec())
         }
-        "HealthCheck" => {
-            Ok(browser_render::HealthCheckRequest {}.encode_to_vec())
-        }
+        "HealthCheck" => Ok(browser_render::HealthCheckRequest {}.encode_to_vec()),
 
         // EtcScraperService
         "EtcScrape" | "EtcScrapeQueue" => {
@@ -628,22 +708,27 @@ fn convert_json_to_proto(method: &str, json_bytes: &[u8]) -> Result<Vec<u8>, Str
                 password: req.password.unwrap_or_default(),
                 download_path: req.download_path.unwrap_or_default(),
                 headless: req.headless.unwrap_or(true),
-            }.encode_to_vec())
+            }
+            .encode_to_vec())
         }
         "EtcScrapeBatch" | "EtcScrapeBatchQueue" => {
             let req: EtcBatchJson = serde_json::from_slice(json_bytes)
                 .map_err(|e| format!("JSON parse error: {}", e))?;
             Ok(browser_render::EtcBatchRequest {
-                accounts: req.accounts.unwrap_or_default().into_iter().map(|a| {
-                    browser_render::EtcAccountInfo {
+                accounts: req
+                    .accounts
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|a| browser_render::EtcAccountInfo {
                         user_id: a.user_id.unwrap_or_default(),
                         password: a.password.unwrap_or_default(),
                         name: a.name.unwrap_or_default(),
-                    }
-                }).collect(),
+                    })
+                    .collect(),
                 download_path: req.download_path.unwrap_or_default(),
                 headless: req.headless.unwrap_or(true),
-            }.encode_to_vec())
+            }
+            .encode_to_vec())
         }
         "EtcScrapeBatchEnv" | "EtcScrapeBatchEnvQueue" => {
             let req: EtcBatchEnvJson = serde_json::from_slice(json_bytes)
@@ -652,14 +737,16 @@ fn convert_json_to_proto(method: &str, json_bytes: &[u8]) -> Result<Vec<u8>, Str
                 download_path: req.download_path.unwrap_or_default(),
                 headless: req.headless.unwrap_or(true),
                 headless_set: req.headless.is_some(),
-            }.encode_to_vec())
+            }
+            .encode_to_vec())
         }
         "GetJob" => {
             let req: GetJobJson = serde_json::from_slice(json_bytes)
                 .map_err(|e| format!("JSON parse error: {}", e))?;
             Ok(browser_render::GetJobRequest {
                 job_id: req.job_id.unwrap_or_default(),
-            }.encode_to_vec())
+            }
+            .encode_to_vec())
         }
         "ListJobs" => {
             let req: ListJobsJson = serde_json::from_slice(json_bytes)
@@ -667,20 +754,18 @@ fn convert_json_to_proto(method: &str, json_bytes: &[u8]) -> Result<Vec<u8>, Str
             Ok(browser_render::ListJobsRequest {
                 job_type: req.job_type.unwrap_or_default(),
                 status: req.status.unwrap_or_default(),
-            }.encode_to_vec())
+            }
+            .encode_to_vec())
         }
-        "GetQueueStatus" => {
-            Ok(browser_render::GetQueueStatusRequest {}.encode_to_vec())
-        }
-        "ListSessions" => {
-            Ok(browser_render::ListSessionsRequest {}.encode_to_vec())
-        }
+        "GetQueueStatus" => Ok(browser_render::GetQueueStatusRequest {}.encode_to_vec()),
+        "ListSessions" => Ok(browser_render::ListSessionsRequest {}.encode_to_vec()),
         "ListSessionFiles" => {
             let req: ListSessionFilesJson = serde_json::from_slice(json_bytes)
                 .map_err(|e| format!("JSON parse error: {}", e))?;
             Ok(browser_render::ListSessionFilesRequest {
                 session_id: req.session_id.unwrap_or_default(),
-            }.encode_to_vec())
+            }
+            .encode_to_vec())
         }
         "DownloadFile" => {
             let req: DownloadFileJson = serde_json::from_slice(json_bytes)
@@ -688,7 +773,8 @@ fn convert_json_to_proto(method: &str, json_bytes: &[u8]) -> Result<Vec<u8>, Str
             Ok(browser_render::DownloadFileRequest {
                 session_id: req.session_id.unwrap_or_default(),
                 file_name: req.file_name.unwrap_or_default(),
-            }.encode_to_vec())
+            }
+            .encode_to_vec())
         }
         _ => Err(format!("Unknown method: {}", method)),
     }
@@ -704,12 +790,16 @@ fn convert_proto_to_json(method: &str, proto_bytes: &[u8]) -> Result<String, Str
             let json = GetVehicleDataResponseJson {
                 status: resp.status,
                 status_code: resp.status_code,
-                data: resp.data.into_iter().map(|v| VehicleDataJson {
-                    vehicle_cd: v.vehicle_cd,
-                    vehicle_name: v.vehicle_name,
-                    status: v.status,
-                    metadata: v.metadata,
-                }).collect(),
+                data: resp
+                    .data
+                    .into_iter()
+                    .map(|v| VehicleDataJson {
+                        vehicle_cd: v.vehicle_cd,
+                        vehicle_name: v.vehicle_name,
+                        status: v.status,
+                        metadata: v.metadata,
+                    })
+                    .collect(),
                 session_id: resp.session_id,
             };
             serde_json::to_string(&json).map_err(|e| format!("JSON serialize error: {}", e))
@@ -744,8 +834,12 @@ fn convert_proto_to_json(method: &str, proto_bytes: &[u8]) -> Result<String, Str
         }
 
         // EtcScraperService
-        "EtcScrape" | "EtcScrapeQueue" | "EtcScrapeBatch" | "EtcScrapeBatchQueue"
-        | "EtcScrapeBatchEnv" | "EtcScrapeBatchEnvQueue" => {
+        "EtcScrape"
+        | "EtcScrapeQueue"
+        | "EtcScrapeBatch"
+        | "EtcScrapeBatchQueue"
+        | "EtcScrapeBatchEnv"
+        | "EtcScrapeBatchEnvQueue" => {
             let resp = browser_render::EtcScrapeResponse::decode(proto_bytes)
                 .map_err(|e| format!("Protobuf decode error: {}", e))?;
             let json = EtcScrapeResponseJson {
@@ -787,10 +881,14 @@ fn convert_proto_to_json(method: &str, proto_bytes: &[u8]) -> Result<String, Str
             let resp = browser_render::ListSessionsResponse::decode(proto_bytes)
                 .map_err(|e| format!("Protobuf decode error: {}", e))?;
             let json = ListSessionsResponseJson {
-                sessions: resp.sessions.into_iter().map(|s| SessionInfoJson {
-                    name: s.name,
-                    file_count: s.file_count,
-                }).collect(),
+                sessions: resp
+                    .sessions
+                    .into_iter()
+                    .map(|s| SessionInfoJson {
+                        name: s.name,
+                        file_count: s.file_count,
+                    })
+                    .collect(),
             };
             serde_json::to_string(&json).map_err(|e| format!("JSON serialize error: {}", e))
         }
@@ -799,10 +897,14 @@ fn convert_proto_to_json(method: &str, proto_bytes: &[u8]) -> Result<String, Str
                 .map_err(|e| format!("Protobuf decode error: {}", e))?;
             let json = ListSessionFilesResponseJson {
                 session_id: resp.session_id,
-                files: resp.files.into_iter().map(|f| FileInfoJson {
-                    name: f.name,
-                    size: f.size,
-                }).collect(),
+                files: resp
+                    .files
+                    .into_iter()
+                    .map(|f| FileInfoJson {
+                        name: f.name,
+                        size: f.size,
+                    })
+                    .collect(),
             };
             serde_json::to_string(&json).map_err(|e| format!("JSON serialize error: {}", e))
         }
@@ -829,28 +931,64 @@ fn job_proto_to_json(job: browser_render::Job) -> JobJson {
         priority: job.priority,
         status: job.status,
         created_at: job.created_at,
-        started_at: if job.started_at.is_empty() { None } else { Some(job.started_at) },
-        completed_at: if job.completed_at.is_empty() { None } else { Some(job.completed_at) },
-        error: if job.error.is_empty() { None } else { Some(job.error) },
+        started_at: if job.started_at.is_empty() {
+            None
+        } else {
+            Some(job.started_at)
+        },
+        completed_at: if job.completed_at.is_empty() {
+            None
+        } else {
+            Some(job.completed_at)
+        },
+        error: if job.error.is_empty() {
+            None
+        } else {
+            Some(job.error)
+        },
         etc_result: job.etc_result.map(|r| EtcScrapeResultJson {
             csv_path: r.csv_path,
             csv_size: r.csv_size,
         }),
         batch_result: job.batch_result.map(|r| EtcBatchResultJson {
             session_folder: r.session_folder,
-            accounts: r.accounts.into_iter().map(|a| AccountResultJson {
-                user_id: a.user_id,
-                name: if a.name.is_empty() { None } else { Some(a.name) },
-                status: a.status,
-                csv_path: if a.csv_path.is_empty() { None } else { Some(a.csv_path) },
-                csv_size: if a.csv_size == 0 { None } else { Some(a.csv_size) },
-                error: if a.error.is_empty() { None } else { Some(a.error) },
-            }).collect(),
+            accounts: r
+                .accounts
+                .into_iter()
+                .map(|a| AccountResultJson {
+                    user_id: a.user_id,
+                    name: if a.name.is_empty() {
+                        None
+                    } else {
+                        Some(a.name)
+                    },
+                    status: a.status,
+                    csv_path: if a.csv_path.is_empty() {
+                        None
+                    } else {
+                        Some(a.csv_path)
+                    },
+                    csv_size: if a.csv_size == 0 {
+                        None
+                    } else {
+                        Some(a.csv_size)
+                    },
+                    error: if a.error.is_empty() {
+                        None
+                    } else {
+                        Some(a.error)
+                    },
+                })
+                .collect(),
             total_count: r.total_count,
             success_count: r.success_count,
             fail_count: r.fail_count,
         }),
-        current_account_index: if job.current_account_index == 0 { None } else { Some(job.current_account_index) },
+        current_account_index: if job.current_account_index == 0 {
+            None
+        } else {
+            Some(job.current_account_index)
+        },
     }
 }
 
@@ -1077,7 +1215,7 @@ struct AccountResultJson {
 
 #[derive(Serialize)]
 struct DownloadFileChunkJson {
-    data: String,   // Base64 encoded data
+    data: String, // Base64 encoded data
     offset: i64,
     total_size: i64,
     is_last: bool,

@@ -56,7 +56,7 @@ async fn test_vehicle_data_extraction() {
         headless: true,
         debug: false,
         session_ttl_secs: 1800,
-        grpc_url: None,              // No gRPC for this test
+        grpc_url: None, // No gRPC for this test
         grpc_organization_id: None,
     };
 
@@ -65,7 +65,11 @@ async fn test_vehicle_data_extraction() {
     // Initialize scraper
     println!("Initializing scraper...");
     let init_result = scraper.initialize().await;
-    assert!(init_result.is_ok(), "Failed to initialize scraper: {:?}", init_result.err());
+    assert!(
+        init_result.is_ok(),
+        "Failed to initialize scraper: {:?}",
+        init_result.err()
+    );
 
     // Execute scrape
     println!("Executing scrape...");
@@ -73,7 +77,10 @@ async fn test_vehicle_data_extraction() {
 
     match &result {
         Ok(scrape_result) => {
-            println!("Success! Extracted {} vehicles", scrape_result.vehicles.len());
+            println!(
+                "Success! Extracted {} vehicles",
+                scrape_result.vehicles.len()
+            );
             println!("Raw data count: {}", scrape_result.raw_data.len());
         }
         Err(e) => {
@@ -81,7 +88,11 @@ async fn test_vehicle_data_extraction() {
         }
     }
 
-    assert!(result.is_ok(), "Vehicle data extraction failed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Vehicle data extraction failed: {:?}",
+        result.err()
+    );
 
     let scrape_result = result.unwrap();
 
@@ -104,8 +115,16 @@ async fn test_vehicle_data_extraction() {
     for (i, item) in scrape_result.raw_data.iter().take(3).enumerate() {
         assert!(item.is_object(), "Raw data item {} is not an object", i);
         let obj = item.as_object().unwrap();
-        assert!(obj.contains_key("VehicleCD"), "Item {} missing VehicleCD", i);
-        assert!(obj.contains_key("VehicleName"), "Item {} missing VehicleName", i);
+        assert!(
+            obj.contains_key("VehicleCD"),
+            "Item {} missing VehicleCD",
+            i
+        );
+        assert!(
+            obj.contains_key("VehicleName"),
+            "Item {} missing VehicleName",
+            i
+        );
     }
 
     println!("=== All assertions passed ===");

@@ -33,7 +33,13 @@ pub fn create_router(state: Arc<AppState>) -> Router {
     // Configure CORS
     let cors = CorsLayer::new()
         .allow_origin(Any)
-        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
         .allow_headers(Any);
 
     // Create gRPC JSON transcoding router
@@ -45,12 +51,27 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/v1/etc/scrape", post(handle_etc_scrape))
         .route("/v1/etc/scrape/queue", post(handle_etc_scrape_queue))
         .route("/v1/etc/scrape/batch", post(handle_etc_scrape_batch))
-        .route("/v1/etc/scrape/batch/queue", post(handle_etc_scrape_batch_queue))
-        .route("/v1/etc/scrape/batch/env", post(handle_etc_scrape_batch_env))
-        .route("/v1/etc/scrape/batch/env/queue", post(handle_etc_scrape_batch_env_queue))
+        .route(
+            "/v1/etc/scrape/batch/queue",
+            post(handle_etc_scrape_batch_queue),
+        )
+        .route(
+            "/v1/etc/scrape/batch/env",
+            post(handle_etc_scrape_batch_env),
+        )
+        .route(
+            "/v1/etc/scrape/batch/env/queue",
+            post(handle_etc_scrape_batch_env_queue),
+        )
         .route("/v1/etc/sessions", get(handle_etc_sessions))
-        .route("/v1/etc/sessions/:session_id/files", get(handle_etc_session_files))
-        .route("/v1/etc/sessions/:session_id/files/:filename", get(handle_etc_file_download))
+        .route(
+            "/v1/etc/sessions/:session_id/files",
+            get(handle_etc_session_files),
+        )
+        .route(
+            "/v1/etc/sessions/:session_id/files/:filename",
+            get(handle_etc_file_download),
+        )
         .route("/v1/job/:id", get(handle_job_status))
         .route("/v1/jobs", get(handle_jobs_list))
         .route("/v1/jobs/queue", get(handle_queue_status))
@@ -233,9 +254,7 @@ struct SessionFilesResponse {
 // ========== Handlers ==========
 
 /// Vehicle data endpoint - creates a new job
-async fn handle_vehicle_data(
-    State(state): State<Arc<AppState>>,
-) -> impl IntoResponse {
+async fn handle_vehicle_data(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let job_id = state.job_manager.create_job().await;
     info!("Created new job: {}", job_id);
 
@@ -291,7 +310,10 @@ async fn handle_etc_scrape(
         .create_etc_job(request, JobPriority::Normal)
         .await;
 
-    info!("Created ETC scrape job (immediate): {} for user {}", job_id, body.user_id);
+    info!(
+        "Created ETC scrape job (immediate): {} for user {}",
+        job_id, body.user_id
+    );
 
     (
         StatusCode::ACCEPTED,
@@ -320,7 +342,10 @@ async fn handle_etc_scrape_queue(
         .create_etc_job(request, JobPriority::Low)
         .await;
 
-    info!("Created ETC scrape job (queued): {} for user {}", job_id, body.user_id);
+    info!(
+        "Created ETC scrape job (queued): {} for user {}",
+        job_id, body.user_id
+    );
 
     (
         StatusCode::ACCEPTED,
@@ -432,11 +457,7 @@ async fn handle_etc_scrape_batch_env(
     let accounts = match get_accounts_from_env() {
         Ok(a) => a,
         Err(e) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(ErrorResponse { error: e }),
-            )
-                .into_response()
+            return (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })).into_response()
         }
     };
 
@@ -481,11 +502,7 @@ async fn handle_etc_scrape_batch_env_queue(
     let accounts = match get_accounts_from_env() {
         Ok(a) => a,
         Err(e) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(ErrorResponse { error: e }),
-            )
-                .into_response()
+            return (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })).into_response()
         }
     };
 
@@ -553,7 +570,10 @@ async fn handle_session_check(
 
     let (is_valid, message) = state.renderer.check_session(&session_id).await;
 
-    (StatusCode::OK, Json(SessionCheckResponse { is_valid, message }))
+    (
+        StatusCode::OK,
+        Json(SessionCheckResponse { is_valid, message }),
+    )
 }
 
 /// Session clear endpoint
@@ -607,10 +627,7 @@ async fn handle_health(State(state): State<Arc<AppState>>) -> impl IntoResponse 
     // Check rust-logi connectivity via gRPC Health
     let rust_logi = if !state.config.rust_logi_url.is_empty() {
         let url = state.config.rust_logi_url.clone();
-        let health_url = format!(
-            "{}/grpc.health.v1.Health/Check",
-            url.trim_end_matches('/')
-        );
+        let health_url = format!("{}/grpc.health.v1.Health/Check", url.trim_end_matches('/'));
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(5))
             .build()
@@ -685,7 +702,8 @@ async fn handle_etc_sessions() -> impl IntoResponse {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({"error": format!("Failed to read directory: {}", e)})),
-            ).into_response();
+            )
+                .into_response();
         }
     };
 
@@ -719,13 +737,15 @@ async fn handle_etc_sessions() -> impl IntoResponse {
     // Sort by name descending (newest first)
     sessions.sort_by(|a, b| b.name.cmp(&a.name));
 
-    (StatusCode::OK, Json(serde_json::json!(SessionsListResponse { sessions }))).into_response()
+    (
+        StatusCode::OK,
+        Json(serde_json::json!(SessionsListResponse { sessions })),
+    )
+        .into_response()
 }
 
 /// List files in a session folder
-async fn handle_etc_session_files(
-    Path(session_id): Path<String>,
-) -> impl IntoResponse {
+async fn handle_etc_session_files(Path(session_id): Path<String>) -> impl IntoResponse {
     // Validate session_id format (YYYYMMDD_HHMMSS)
     if session_id.len() != 15 || session_id.chars().nth(8) != Some('_') {
         return (
@@ -733,7 +753,8 @@ async fn handle_etc_session_files(
             Json(ErrorResponse {
                 error: "Invalid session ID format. Expected YYYYMMDD_HHMMSS".to_string(),
             }),
-        ).into_response();
+        )
+            .into_response();
     }
 
     // Prevent path traversal
@@ -743,7 +764,8 @@ async fn handle_etc_session_files(
             Json(ErrorResponse {
                 error: "Invalid session ID".to_string(),
             }),
-        ).into_response();
+        )
+            .into_response();
     }
 
     let download_path = default_download_path();
@@ -755,7 +777,8 @@ async fn handle_etc_session_files(
             Json(ErrorResponse {
                 error: format!("Session not found: {}", session_id),
             }),
-        ).into_response();
+        )
+            .into_response();
     }
 
     let entries = match std::fs::read_dir(&session_path) {
@@ -767,7 +790,8 @@ async fn handle_etc_session_files(
                 Json(ErrorResponse {
                     error: format!("Failed to read session: {}", e),
                 }),
-            ).into_response();
+            )
+                .into_response();
         }
     };
 
@@ -775,7 +799,12 @@ async fn handle_etc_session_files(
         .filter_map(|entry| entry.ok())
         .filter_map(|entry| {
             let path = entry.path();
-            if path.is_file() && path.extension().map(|ext| ext.eq_ignore_ascii_case("csv")).unwrap_or(false) {
+            if path.is_file()
+                && path
+                    .extension()
+                    .map(|ext| ext.eq_ignore_ascii_case("csv"))
+                    .unwrap_or(false)
+            {
                 let name = entry.file_name().to_string_lossy().to_string();
                 let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
                 Some(FileInfo { name, size })
@@ -790,11 +819,9 @@ async fn handle_etc_session_files(
 
     (
         StatusCode::OK,
-        Json(SessionFilesResponse {
-            session_id,
-            files,
-        }),
-    ).into_response()
+        Json(SessionFilesResponse { session_id, files }),
+    )
+        .into_response()
 }
 
 /// Download a file from a session
@@ -808,19 +835,25 @@ async fn handle_etc_file_download(
             Json(ErrorResponse {
                 error: "Invalid session ID format".to_string(),
             }),
-        ).into_response();
+        )
+            .into_response();
     }
 
     // Prevent path traversal
-    if session_id.contains("..") || session_id.contains('/') || session_id.contains('\\')
-        || filename.contains("..") || filename.contains('/') || filename.contains('\\')
+    if session_id.contains("..")
+        || session_id.contains('/')
+        || session_id.contains('\\')
+        || filename.contains("..")
+        || filename.contains('/')
+        || filename.contains('\\')
     {
         return (
             StatusCode::BAD_REQUEST,
             Json(ErrorResponse {
                 error: "Invalid path".to_string(),
             }),
-        ).into_response();
+        )
+            .into_response();
     }
 
     // Only allow CSV files
@@ -830,7 +863,8 @@ async fn handle_etc_file_download(
             Json(ErrorResponse {
                 error: "Only CSV files can be downloaded".to_string(),
             }),
-        ).into_response();
+        )
+            .into_response();
     }
 
     let download_path = default_download_path();
@@ -844,7 +878,8 @@ async fn handle_etc_file_download(
             Json(ErrorResponse {
                 error: format!("File not found: {}", filename),
             }),
-        ).into_response();
+        )
+            .into_response();
     }
 
     match std::fs::read(&file_path) {
@@ -865,7 +900,8 @@ async fn handle_etc_file_download(
                 Json(ErrorResponse {
                     error: format!("Failed to read file: {}", e),
                 }),
-            ).into_response()
+            )
+                .into_response()
         }
     }
 }

@@ -15,8 +15,8 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
-use crate::jobs::JobPriority;
 use super::http::AppState;
+use crate::jobs::JobPriority;
 
 // ========== Request Types ==========
 
@@ -61,7 +61,6 @@ pub struct EtcBatchEnvRequest {
     #[serde(default)]
     pub headless_set: bool,
 }
-
 
 fn default_headless() -> bool {
     true
@@ -184,7 +183,6 @@ pub struct AccountResult {
     pub error: String,
 }
 
-
 // ========== Helper Functions ==========
 
 fn get_accounts_from_env() -> Result<Vec<crate::jobs::EtcAccountInfo>, String> {
@@ -262,14 +260,23 @@ pub fn create_grpc_json_router() -> Router<Arc<AppState>> {
         .route("/grpc/EtcScrape", post(handle_etc_scrape))
         .route("/grpc/EtcScrapeQueue", post(handle_etc_scrape_queue))
         .route("/grpc/EtcScrapeBatch", post(handle_etc_scrape_batch))
-        .route("/grpc/EtcScrapeBatchQueue", post(handle_etc_scrape_batch_queue))
+        .route(
+            "/grpc/EtcScrapeBatchQueue",
+            post(handle_etc_scrape_batch_queue),
+        )
         .route("/grpc/EtcScrapeBatchEnv", post(handle_etc_scrape_batch_env))
-        .route("/grpc/EtcScrapeBatchEnvQueue", post(handle_etc_scrape_batch_env_queue))
+        .route(
+            "/grpc/EtcScrapeBatchEnvQueue",
+            post(handle_etc_scrape_batch_env_queue),
+        )
         .route("/grpc/GetJob/:job_id", get(handle_get_job))
         .route("/grpc/ListJobs", get(handle_list_jobs))
         .route("/grpc/GetQueueStatus", get(handle_get_queue_status))
         .route("/grpc/ListSessions", get(handle_list_sessions))
-        .route("/grpc/ListSessionFiles/:session_id", get(handle_list_session_files))
+        .route(
+            "/grpc/ListSessionFiles/:session_id",
+            get(handle_list_session_files),
+        )
         // BrowserRenderService
         .route("/grpc/HealthCheck", get(handle_health_check))
 }
@@ -309,7 +316,10 @@ async fn handle_etc_scrape_queue(
     State(state): State<Arc<AppState>>,
     Json(req): Json<EtcScrapeRequest>,
 ) -> impl IntoResponse {
-    info!("gRPC-JSON EtcScrapeQueue called for user_id={}", req.user_id);
+    info!(
+        "gRPC-JSON EtcScrapeQueue called for user_id={}",
+        req.user_id
+    );
 
     let etc_request = crate::jobs::EtcScrapeRequest {
         user_id: req.user_id.clone(),
@@ -339,7 +349,10 @@ async fn handle_etc_scrape_batch(
     Json(req): Json<EtcBatchRequest>,
 ) -> impl IntoResponse {
     let account_count = req.accounts.len();
-    info!("gRPC-JSON EtcScrapeBatch called for {} accounts", account_count);
+    info!(
+        "gRPC-JSON EtcScrapeBatch called for {} accounts",
+        account_count
+    );
 
     let accounts: Vec<crate::jobs::EtcAccountInfo> = req
         .accounts
@@ -369,7 +382,10 @@ async fn handle_etc_scrape_batch(
     Json(EtcScrapeResponse {
         job_id,
         status: "pending".to_string(),
-        message: format!("ETC batch scrape job created for {} accounts.", account_count),
+        message: format!(
+            "ETC batch scrape job created for {} accounts.",
+            account_count
+        ),
     })
 }
 
@@ -378,7 +394,10 @@ async fn handle_etc_scrape_batch_queue(
     Json(req): Json<EtcBatchRequest>,
 ) -> impl IntoResponse {
     let account_count = req.accounts.len();
-    info!("gRPC-JSON EtcScrapeBatchQueue called for {} accounts", account_count);
+    info!(
+        "gRPC-JSON EtcScrapeBatchQueue called for {} accounts",
+        account_count
+    );
 
     let accounts: Vec<crate::jobs::EtcAccountInfo> = req
         .accounts
@@ -408,7 +427,10 @@ async fn handle_etc_scrape_batch_queue(
     Json(EtcScrapeResponse {
         job_id,
         status: "queued".to_string(),
-        message: format!("ETC batch scrape job queued for {} accounts.", account_count),
+        message: format!(
+            "ETC batch scrape job queued for {} accounts.",
+            account_count
+        ),
     })
 }
 
@@ -449,7 +471,10 @@ async fn handle_etc_scrape_batch_env(
     Json(EtcScrapeResponse {
         job_id,
         status: "pending".to_string(),
-        message: format!("ETC batch scrape job created for {} accounts from env.", account_count),
+        message: format!(
+            "ETC batch scrape job created for {} accounts from env.",
+            account_count
+        ),
     })
     .into_response()
 }
@@ -491,7 +516,10 @@ async fn handle_etc_scrape_batch_env_queue(
     Json(EtcScrapeResponse {
         job_id,
         status: "queued".to_string(),
-        message: format!("ETC batch scrape job queued for {} accounts from env.", account_count),
+        message: format!(
+            "ETC batch scrape job queued for {} accounts from env.",
+            account_count
+        ),
     })
     .into_response()
 }
@@ -588,7 +616,10 @@ async fn handle_list_sessions() -> impl IntoResponse {
 }
 
 async fn handle_list_session_files(Path(session_id): Path<String>) -> impl IntoResponse {
-    info!("gRPC-JSON ListSessionFiles called for session_id={}", session_id);
+    info!(
+        "gRPC-JSON ListSessionFiles called for session_id={}",
+        session_id
+    );
 
     if session_id.len() != 15 || session_id.chars().nth(8) != Some('_') {
         return (
@@ -639,7 +670,9 @@ async fn handle_list_session_files(Path(session_id): Path<String>) -> impl IntoR
                     .unwrap_or(false)
             {
                 let name = entry.file_name().to_string_lossy().to_string();
-                let size = std::fs::metadata(&path).map(|m| m.len() as i64).unwrap_or(0);
+                let size = std::fs::metadata(&path)
+                    .map(|m| m.len() as i64)
+                    .unwrap_or(0);
                 Some(FileInfo { name, size })
             } else {
                 None

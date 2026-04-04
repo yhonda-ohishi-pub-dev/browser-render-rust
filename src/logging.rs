@@ -31,8 +31,8 @@ pub struct LoggingGuard {
 pub fn init_logging(cfg: &Config) -> LoggingGuard {
     // Build env filter with RUST_LOG support
     let default_level = if cfg.browser_debug { "debug" } else { "info" };
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(default_level));
+    let env_filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_level));
 
     // Time format for timestamps (RFC 3339)
     let timer = UtcTime::rfc_3339();
