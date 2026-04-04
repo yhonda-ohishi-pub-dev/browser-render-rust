@@ -802,14 +802,21 @@ async fn send_dtakologs(
         .map_err(|e| format!("REST request failed: {}", e))?;
 
     let status = resp.status();
-    let body: serde_json::Value = resp
-        .json()
+    let text = resp
+        .text()
         .await
-        .map_err(|e| format!("Failed to parse response: {}", e))?;
+        .map_err(|e| format!("Failed to read response: {}", e))?;
 
     if !status.is_success() {
-        return Err(format!("REST API returned {}: {:?}", status, body));
+        return Err(format!("REST API returned {}: {}", status, text));
     }
+
+    let body: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
+        format!(
+            "Failed to parse JSON (status={}): {} body={}",
+            status, e, text
+        )
+    })?;
 
     let result = HonoApiResponse {
         success: body["success"].as_bool().unwrap_or(false),
